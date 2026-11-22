@@ -93,11 +93,12 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
         raise RuntimeError("GEMINI_API_KEY is missing! Add it to GitHub Secrets or config.env.")
 
     is_shorts = VIDEO_FORMAT == "shorts"
-    scene_count = "5" if is_shorts else "7"
+    scene_count = "5" if is_shorts else "36"
+    words_per_scene = "22-28" if is_shorts else "38-45"
     duration_hint = (
         "45-55 seconds total (fast-paced US YouTube Shorts news bulletin)"
         if is_shorts
-        else "80-110 seconds total (crisp, high-retention US Tech/AI/Gaming News Bulletin)"
+        else "8.5 to 10 minutes total (~1,400 to 1,550 spoken words — high-retention US Tech/AI/Gaming Deep-Dive)"
     )
 
     if custom_topic:
@@ -116,46 +117,59 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
             + topics_list
         )
 
-    format_label = "YouTube Shorts (9:16 vertical)" if is_shorts else "Standard Horizontal YouTube Video (16:9)"
+    format_label = "YouTube Shorts (9:16 vertical)" if is_shorts else "Long-Form Horizontal YouTube Video (16:9, 8-10 minutes)"
     shorts_hash = " and #Shorts" if is_shorts else ""
 
-    prompt = f"""You are the Executive Producer, Breaking News Anchor Scriptwriter, and YouTube SEO Director for "{CHANNEL_NAME}" — a fast-paced, US-based YouTube channel delivering US Trends and Worldwide Tech, AI, and Gaming News Bulletins.
+    if is_shorts:
+        structure_guide = """
+   - Scene 1: Instant 3-second breaking-news hook.
+   - Scenes 2-4: Key facts, numbers, and global impact.
+   - Scene 5: Sharp verdict + Subscribe CTA."""
+    else:
+        structure_guide = """
+   Structure the 36 scenes like a top US YouTube tech/gaming documentary (ColdFusion / TechLinked / Gameranx pacing):
+   - Scenes 1-3 (The Hook): Explosive cold open with the shocking headline, exact numbers/stakes, and a compelling reason to watch till the end. (NEVER say "Hey guys welcome back".)
+   - Scenes 4-10 (What Just Happened): Full detailed breakdown of the breaking announcement, specs, leaks, pricing, or release details.
+   - Scenes 11-18 (The Hidden Backstory): Why this happened right now, past industry mistakes or breakthroughs, and how rival giants (NVIDIA, OpenAI, Apple, Microsoft, Sony, Rockstar, etc.) are connected.
+   - Scenes 19-26 (Deep Impact Analysis): How this actually changes things for everyday US consumers, developers, gamers, and Wall Street / the global market.
+   - Scenes 27-33 (Controversies, Risks & What Comes Next): Real criticism, potential flaws, bold predictions for 2026-2027, and what competitors will do to strike back.
+   - Scenes 34-36 (Final Verdict & Community Engagement): Memorable takeaway, a sharp debate question for the comments section, and a smooth Subscribe CTA for Quick Shift Creative."""
+
+    prompt = f"""You are the Executive Producer, Lead Documentary Scriptwriter, and YouTube SEO Director for "{CHANNEL_NAME}" — a premier US-based YouTube channel delivering in-depth US Trends and Worldwide Tech, AI, and Gaming analysis.
 
 {topic_block}
 
-Target Audience: 100% US & Global English-speaking viewers (natural, sharp American English news-bulletin tone — NEVER use regional slang outside US/global tech & gaming culture).
+Target Audience: 100% US & Global English-speaking viewers (natural, sharp, authoritative American English — zero fluff, zero filler, constant curiosity loops between sections).
 Format: {format_label}
 Target Length: {duration_hint}
-Number of Scenes: Exactly {scene_count} scenes.
+Number of Scenes: EXACTLY {scene_count} scenes. Do NOT stop early — you MUST output all {scene_count} scenes!
 
 Requirements:
 1. Select ONE blockbuster breaking story from the live headlines (or use the mandatory topic).
 2. Classify the story into exact "category": one of "ai", "tech", or "gaming".
-3. Choose a short 2-word uppercase "bulletin_badge" for the thumbnail corner (e.g., "AI BULLETIN", "TECH NEWS", "GAMING ALERT", "US TRENDING").
+3. Choose a short 2-word uppercase "bulletin_badge" for the thumbnail corner (e.g., "AI DEEP DIVE", "TECH ALERT", "GAMING NEWS", "US TRENDING").
 4. Create an ultra-high-CTR US YouTube Title (max 82 characters, main trending keyword/company/game right at the start, strong curiosity gap, zero fake clickbait).
 5. Create a complete US/Global SEO-optimized YouTube Description:
-   - Punchy 2-line breaking bulletin summary packed with search keywords
-   - 3 concise bullet-point highlights from this update
-   - Subscribe CTA for "{CHANNEL_NAME}" ("Subscribe to Quick Shift Creative for daily US & Worldwide Tech, AI, and Gaming News Bulletins!")
-   - 6 high-traffic hashtags at the bottom (always include #QuickShiftCreative and relevant tags like #TechNews #AINews #GamingNews #USTrends{shorts_hash})
+   - Punchy 2-line hook packed with high-volume US search keywords
+   - 5 concise bullet-point highlights covered in this deep dive
+   - Subscribe CTA for "{CHANNEL_NAME}"
+   - 6 high-traffic hashtags at the bottom (#QuickShiftCreative #TechNews #AINews #GamingNews #USTrends{shorts_hash})
 6. Create 15 high-search-volume US/Global YouTube SEO tags (array of short strings, NO # symbols).
 7. Create high-CTR Thumbnail copy:
-   - thumbnail_headline: 2 to 4 BOLD ALL-CAPS punchy words (max 22 chars total) readable at a glance on US mobile feeds.
-   - thumbnail_subtext: 2 to 4 short supporting words (max 24 chars, e.g., "GAME CHANGER 2026", "NEW AI LEAK", "HUGE UPDATE").
-   - thumbnail_query: 2 simple English words for searching a dramatic background photo on Pixabay (e.g., "futuristic microchip", "gaming controller", "server room", "cyberpunk neon").
-8. Write {scene_count} tightly paced news-bulletin scenes:
-   - Scene 1: Instant 3-second breaking-news hook (e.g., "Breaking in tech today..." or direct shocking fact — no boring "Hey guys welcome back").
-   - Middle scenes: Crisp worldwide bulletin breakdown — what just happened, why it matters globally, industry/gamer/consumer impact, and what happens next.
-   - Final scene: Sharp closing insight + smooth CTA to subscribe to "{CHANNEL_NAME}" for the next global Tech, AI & Gaming bulletin.
+   - thumbnail_headline: 2 to 4 BOLD ALL-CAPS punchy words (max 22 chars total).
+   - thumbnail_subtext: 2 to 4 short supporting words (max 24 chars, e.g., "EVERYTHING CHANGES", "FULL BREAKDOWN", "HUGE LEAK").
+   - thumbnail_query: 2 simple English words for a dramatic Pixabay photo (e.g., "futuristic microchip", "gaming setup", "cyberpunk neon").
+8. Write EXACTLY {scene_count} tightly paced scenes:
+{structure_guide}
    - Each scene MUST include:
-     * "narration": 20-32 spoken words in natural US English broadcast style (NO emojis, NO markdown, NO stage directions).
-     * "visual_query": 2 simple English keywords that return great HD stock footage on Pixabay (e.g., "artificial intelligence", "esports gaming", "computer hardware", "silicon valley", "smartphone technology", "robot futuristic").
+     * "narration": {words_per_scene} spoken words in smooth, conversational US broadcast English (NO emojis, NO markdown, NO stage directions, NO scene numbers spoken aloud).
+     * "visual_query": 2 simple, DIFFERENT English keywords per scene for Pixabay HD stock video (NEVER repeat the same visual_query in nearby scenes — vary between hardware, coding, data center, neon city, gaming setup, smartphone, stock chart, robotics, astronaut, studio desk, server rack, esports arena, microchip, laboratory, futuristic car, etc.).
 
 Return ONLY a valid JSON object matching this exact schema:
 {{
   "chosen_topic": "string",
   "category": "ai",
-  "bulletin_badge": "AI BULLETIN",
+  "bulletin_badge": "AI DEEP DIVE",
   "title": "string",
   "description": "string",
   "tags": ["tag1", "tag2"],
@@ -175,6 +189,7 @@ Return ONLY a valid JSON object matching this exact schema:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.72,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
         },
     }
@@ -185,8 +200,8 @@ Return ONLY a valid JSON object matching this exact schema:
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
         try:
-            print(f"[Gemini] Building US Tech/AI/Gaming Bulletin with {model}...")
-            resp = requests.post(url, json=payload, timeout=60)
+            print(f"[Gemini] Building 8-10 min US Deep-Dive with {model}...")
+            resp = requests.post(url, json=payload, timeout=120)
             if resp.status_code != 200:
                 last_error = f"{model} HTTP {resp.status_code}: {resp.text[:300]}"
                 print(f"[Gemini] Fallback triggered: {last_error}")
@@ -200,7 +215,7 @@ Return ONLY a valid JSON object matching this exact schema:
 
             cat = str(blueprint.get("category", "tech")).strip().lower()
             blueprint["category"] = cat if cat in ("ai", "tech", "gaming") else "tech"
-            blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "TECH BULLETIN")).upper().strip()[:18]
+            blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "TECH DEEP DIVE")).upper().strip()[:18]
 
             blueprint["title"] = blueprint["title"].strip()[:98]
             if is_shorts and "#shorts" not in blueprint["title"].lower():
@@ -215,7 +230,9 @@ Return ONLY a valid JSON object matching this exact schema:
             if not blueprint["scenes"]:
                 raise ValueError("All generated scenes had empty narration.")
 
+            total_words = sum(len(s["narration"].split()) for s in blueprint["scenes"])
             print(f"[Gemini] Chosen Story ({blueprint['category'].upper()}): {blueprint.get('chosen_topic')}")
+            print(f"[Gemini] Generated {len(blueprint['scenes'])} scenes (~{total_words} words)")
             print(f"[Gemini] SEO Title: {blueprint['title']}")
             return blueprint
         except Exception as e:
