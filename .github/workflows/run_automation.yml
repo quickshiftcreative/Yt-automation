@@ -2,21 +2,24 @@ name: My automation YT - Quick Shift Creative (US Bulletin)
 
 on:
   schedule:
-    # Runs automatically every day at US Prime Time: 4:00 PM EST / 1:00 PM PST (21:00 UTC)
-    - cron: '0 21 * * *'
+    - cron: '15 13 * * *'  # 8:15 AM EST / 5:15 AM PST (US Morning)
+    - cron: '15 16 * * *'  # 11:15 AM EST / 8:15 AM PST (West Coast Morning)
+    - cron: '15 19 * * *'  # 2:15 PM EST / 11:15 AM PST (US Lunch)
+    - cron: '15 22 * * *'  # 5:15 PM EST / 2:15 PM PST (After-Work Rush)
+    - cron: '15 1 * * *'   # 8:15 PM EST / 5:15 PM PST (US Prime Time)
+    - cron: '15 4 * * *'   # 11:15 PM EST / 8:15 PM PST (Late-Night Gamers)
   workflow_dispatch:
     inputs:
       news_category:
-        description: 'News Bulletin Focus'
+        description: 'US News Category'
         required: true
         default: 'auto'
         type: choice
         options:
           - auto
-          - ai
           - tech
+          - ai
           - gaming
-          - us_trends
       video_format:
         description: 'Video Format'
         required: true
@@ -26,16 +29,15 @@ on:
           - horizontal
           - shorts
       voice_style:
-        description: 'US Neural Voice Anchor'
+        description: 'US Neural Voice Style'
         required: true
         default: 'male_us'
         type: choice
         options:
           - male_us
-          - deep_us
           - female_us
       privacy_status:
-        description: 'YouTube Upload Privacy (Use unlisted for your first test!)'
+        description: 'YouTube Privacy (Manual Run)'
         required: true
         default: 'unlisted'
         type: choice
@@ -44,7 +46,7 @@ on:
           - public
           - private
       custom_topic:
-        description: 'Optional Custom Topic (Leave blank for 100% Auto US/Global Trending)'
+        description: 'Custom Topic (Optional - leave blank for auto US Trends)'
         required: false
         default: ''
         type: string
@@ -55,6 +57,7 @@ permissions:
 jobs:
   create-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -88,8 +91,11 @@ jobs:
         run: python main.py
 
       - name: Save video history (prevent duplicate topics)
+        if: success()
         run: |
-          git config user.name "Quick Shift Creative Bot"
-          git config user.email "bot@quickshiftcreative.local"
-          git add history.json
-          git diff --staged --quiet || (git commit -m "chore: update published US/Global bulletin history" && git push)
+          git config --local user.email "action@github.com"
+          git config --local user.name "Quick Shift Creative Bot"
+          if [ -f history.json ]; then
+            git add history.json
+            git diff --cached --quiet || (git commit -m "chore: update published video history" && git pull --rebase && git push)
+          fi
