@@ -1,25 +1,24 @@
-name: My automation YT - Quick Shift Creative (US Bulletin)
+name: My automation YT - Quick Shift Creative (3 Long + 3 Shorts US)
 
 on:
   schedule:
-    - cron: '15 13 * * *'  # 8:15 AM EST / 5:15 AM PST (US Morning)
-    - cron: '15 16 * * *'  # 11:15 AM EST / 8:15 AM PST (West Coast Morning)
-    - cron: '15 19 * * *'  # 2:15 PM EST / 11:15 AM PST (US Lunch)
-    - cron: '15 22 * * *'  # 5:15 PM EST / 2:15 PM PST (After-Work Rush)
-    - cron: '15 1 * * *'   # 8:15 PM EST / 5:15 PM PST (US Prime Time)
-    - cron: '15 4 * * *'   # 11:15 PM EST / 8:15 PM PST (Late-Night Gamers)
+    - cron: '15 13 * * *'  # Slot 1: 8:15 AM EST  (6:45 PM IST)  | SHORT  - News Bulletin
+    - cron: '15 16 * * *'  # Slot 2: 11:15 AM EST (9:45 PM IST)  | LONG   - Full News Bulletin
+    - cron: '15 19 * * *'  # Slot 3: 2:15 PM EST  (12:45 AM IST) | SHORT  - Trending Games/Gamers & Viral
+    - cron: '15 22 * * *'  # Slot 4: 5:15 PM EST  (3:45 AM IST)  | LONG   - Trending Games/Gamers Deep Dive
+    - cron: '15 1 * * *'   # Slot 5: 8:15 PM EST  (6:45 AM IST)  | LONG   - Evergreen High-RPM Deep Dive
+    - cron: '15 4 * * *'   # Slot 6: 11:15 PM EST (9:45 AM IST)  | SHORT  - Evergreen Tech/AI/Business Short
   workflow_dispatch:
     inputs:
-      news_category:
-        description: 'US News Category'
+      content_mode:
+        description: 'Content Pillar'
         required: true
-        default: 'auto'
+        default: 'news_bulletin'
         type: choice
         options:
-          - auto
-          - tech
-          - ai
-          - gaming
+          - news_bulletin
+          - trending_viral
+          - deep_dive_evergreen
       video_format:
         description: 'Video Format'
         required: true
@@ -28,12 +27,24 @@ on:
         options:
           - horizontal
           - shorts
+      news_category:
+        description: 'Focus Category (Optional)'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - tech
+          - ai
+          - gaming
+          - business_market
       voice_style:
         description: 'US Neural Voice Style'
         required: true
-        default: 'male_us'
+        default: 'auto'
         type: choice
         options:
+          - auto
           - male_us
           - female_us
       privacy_status:
@@ -46,7 +57,7 @@ on:
           - public
           - private
       custom_topic:
-        description: 'Custom Topic (Optional - leave blank for auto US Trends)'
+        description: 'Custom Topic (Leave blank for auto)'
         required: false
         default: ''
         type: string
@@ -78,17 +89,75 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Configure Daily US Slot (3 Long + 3 Shorts)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          IN_MODE: ${{ github.event.inputs.content_mode }}
+          IN_FORMAT: ${{ github.event.inputs.video_format }}
+          IN_CATEGORY: ${{ github.event.inputs.news_category }}
+          IN_VOICE: ${{ github.event.inputs.voice_style }}
+          IN_PRIVACY: ${{ github.event.inputs.privacy_status }}
+          IN_TOPIC: ${{ github.event.inputs.custom_topic }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            case "$EVENT_SCHEDULE" in
+              "15 13 * * *")
+                echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
+                echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
+                ;;
+              "15 16 * * *")
+                echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
+                echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
+                ;;
+              "15 19 * * *")
+                echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
+                echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=gaming" >> $GITHUB_ENV
+                ;;
+              "15 22 * * *")
+                echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
+                echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=gaming" >> $GITHUB_ENV
+                ;;
+              "15 1 * * *")
+                echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
+                echo "CONTENT_MODE=deep_dive_evergreen" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
+                ;;
+              "15 4 * * *")
+                echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
+                echo "CONTENT_MODE=deep_dive_evergreen" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
+                ;;
+              *)
+                echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
+                echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
+                ;;
+            esac
+            echo "VOICE_STYLE=auto" >> $GITHUB_ENV
+            echo "PRIVACY_STATUS=public" >> $GITHUB_ENV
+            echo "CUSTOM_TOPIC=" >> $GITHUB_ENV
+          else
+            echo "VIDEO_FORMAT=${IN_FORMAT:-horizontal}" >> $GITHUB_ENV
+            echo "CONTENT_MODE=${IN_MODE:-news_bulletin}" >> $GITHUB_ENV
+            echo "NEWS_CATEGORY=${IN_CATEGORY:-auto}" >> $GITHUB_ENV
+            echo "VOICE_STYLE=${IN_VOICE:-auto}" >> $GITHUB_ENV
+            echo "PRIVACY_STATUS=${IN_PRIVACY:-unlisted}" >> $GITHUB_ENV
+            echo "CUSTOM_TOPIC=${IN_TOPIC}" >> $GITHUB_ENV
+          fi
+
       - name: Run My automation YT (Quick Shift Creative - US Edition)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
-          NEWS_CATEGORY: ${{ github.event.inputs.news_category || 'auto' }}
-          VIDEO_FORMAT: ${{ github.event.inputs.video_format || 'horizontal' }}
-          VOICE_STYLE: ${{ github.event.inputs.voice_style || 'male_us' }}
-          PRIVACY_STATUS: ${{ github.event.inputs.privacy_status || 'public' }}
-          CUSTOM_TOPIC: ${{ github.event.inputs.custom_topic || '' }}
-        run: python main.py
+        run: |
+          echo "Active Slot -> Format: $VIDEO_FORMAT | Mode: $CONTENT_MODE | Category: $NEWS_CATEGORY | Privacy: $PRIVACY_STATUS"
+          python main.py
 
       - name: Save video history (prevent duplicate topics)
         if: success()
