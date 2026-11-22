@@ -3,11 +3,72 @@ import re
 import requests
 from config import GEMINI_API_KEY, CHANNEL_NAME, VIDEO_FORMAT, NEWS_CATEGORY
 
-GEMINI_MODELS = [
+FALLBACK_MODELS = [
+    "gemini-3.0-flash",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
 ]
+
+
+def _discover_gemini_models():
+    """Auto-discovers active Gemini Flash models available for this API key."""
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+        resp = requests.get(url, timeout=20)
+        if resp.status_code != 200:
+            print(f"[Gemini] ListModels HTTP {resp.status_code}, using fallback list.")
+            return FALLBACK_MODELS
+
+        models = resp.json().get("models", [])
+        candidates = []
+        skip_keywords = (
+            "embedding", "aqa", "image", "veo", "tts", "audio",
+            "robotics", "computer-use", "live", "vision", "learnlm",
+        )
+
+        for m in models:
+            name = m.get("name", "").replace("models/", "").strip()
+            methods = m.get("supportedGenerationMethods", [])
+            lname = name.lower()
+            if "generateContent" not in methods:
+                continue
+            if not lname.startswith("gemini"):
+                continue
+            if any(k in lname for k in skip_keywords):
+                continue
+            candidates.append(name)
+
+        def _score(model_name):
+            ln = model_name.lower()
+            score = 0
+            if "flash" in ln:
+                score += 100
+            if "lite" in ln:
+                score -= 10
+            if "preview" in ln or "exp" in ln:
+                score -= 5
+            if "latest" in ln:
+                score += 5
+            ver_match = re.search(r"gemini-(\d+(?:\.\d+)?)", ln)
+            if ver_match:
+                try:
+                    score += int(float(ver_match.group(1)) * 10)
+                except ValueError:
+                    pass
+            return score
+
+        candidates.sort(key=_score, reverse=True)
+        ordered = []
+        for m in candidates + FALLBACK_MODELS:
+            if m not in ordered:
+                ordered.append(m)
+
+        print(f"[Gemini] Auto-discovered active models (top 5): {ordered[:5]}")
+        return ordered[:8]
+    except Exception as e:
+        print(f"[Gemini] Model discovery warning: {e}")
+        return FALLBACK_MODELS
 
 
 def _extract_json(text):
@@ -118,8 +179,10 @@ Return ONLY a valid JSON object matching this exact schema:
         },
     }
 
+    models_to_try = _discover_gemini_models()
     last_error = None
-    for model in GEMINI_MODELS:
+
+    for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
         try:
             print(f"[Gemini] Building US Tech/AI/Gaming Bulletin with {model}...")
