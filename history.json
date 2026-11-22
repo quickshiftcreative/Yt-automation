@@ -2,5 +2,12 @@
   "project": "My automation YT",
   "channel": "Quick Shift Creative",
   "region": "US & Worldwide (Tech, AI, Gaming)",
-  "videos": []
+  "videos": [
+    {
+      "topic": "Grand Theft Auto VI shatters entertainment records with staggering $3.79B debut",
+      "title": "GTA 6 SHATTERS Records With $3.79 Billion Debut! The Biggest Launch Ever",
+      "category": "gaming",
+      "video_id": "9F0s5s6FFKs"
+    }
+  ]
 }
