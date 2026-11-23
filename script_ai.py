@@ -1,7 +1,10 @@
 import json
+import os
 import re
+import xml.etree.ElementTree as ET
 import requests
 from config import GEMINI_API_KEY, CHANNEL_NAME, VIDEO_FORMAT, NEWS_CATEGORY
+from learning_engine import load_strategy_memory
 
 FALLBACK_MODELS = [
     "gemini-3.0-flash",
@@ -10,30 +13,62 @@ FALLBACK_MODELS = [
     "gemini-2.5-flash",
 ]
 
+MODE_RSS_FEEDS = {
+    "news_bulletin": [
+        "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search?q=stock+market+OR+tech+earnings+OR+AI+business+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/search?q=gaming+industry+OR+video+game+news+when:1d&hl=en-US&gl=US&ceid=US:en",
+    ],
+    "trending_viral": [
+        "https://news.google.com/rss/search?q=viral+game+OR+trending+streamer+OR+esports+OR+Twitch+OR+YouTube+gaming+when:2d&hl=en-US&gl=US&ceid=US:en",
+        "https://trends.google.com/trending/rss?geo=US",
+        "https://news.google.com/rss/search?q=trending+tech+OR+viral+AI+tool+when:2d&hl=en-US&gl=US&ceid=US:en",
+    ],
+    "deep_dive_evergreen": [
+        "https://news.google.com/rss/search?q=high+RPM+business+OR+AI+economics+OR+chip+war+OR+market+strategy&hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
+    ],
+}
+
+
+def _fetch_extra_mode_headlines(mode):
+    feeds = MODE_RSS_FEEDS.get(mode, [])
+    collected = []
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for url in feeds:
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                continue
+            root = ET.fromstring(resp.content)
+            for item in root.findall(".//item")[:8]:
+                title_el = item.find("title")
+                if title_el is not None and title_el.text:
+                    clean_title = re.sub(r"\s+", " ", title_el.text).strip()
+                    if clean_title and clean_title not in collected:
+                        collected.append(clean_title)
+        except Exception as e:
+            print(f"[Trends+] Extra RSS skipped ({mode}): {e}")
+    return collected[:16]
+
 
 def _discover_gemini_models():
-    """Auto-discovers active Gemini Flash models available for this API key."""
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
         resp = requests.get(url, timeout=20)
         if resp.status_code != 200:
-            print(f"[Gemini] ListModels HTTP {resp.status_code}, using fallback list.")
             return FALLBACK_MODELS
-
         models = resp.json().get("models", [])
         candidates = []
         skip_keywords = (
             "embedding", "aqa", "image", "veo", "tts", "audio",
             "robotics", "computer-use", "live", "vision", "learnlm",
         )
-
         for m in models:
             name = m.get("name", "").replace("models/", "").strip()
             methods = m.get("supportedGenerationMethods", [])
             lname = name.lower()
-            if "generateContent" not in methods:
-                continue
-            if not lname.startswith("gemini"):
+            if "generateContent" not in methods or not lname.startswith("gemini"):
                 continue
             if any(k in lname for k in skip_keywords):
                 continue
@@ -50,12 +85,6 @@ def _discover_gemini_models():
                 score -= 5
             if "latest" in ln:
                 score += 5
-            ver_match = re.search(r"gemini-(\d+(?:\.\d+)?)", ln)
-            if ver_match:
-                try:
-                    score += int(float(ver_match.group(1)) * 10)
-                except ValueError:
-                    pass
             return score
 
         candidates.sort(key=_score, reverse=True)
@@ -63,11 +92,8 @@ def _discover_gemini_models():
         for m in candidates + FALLBACK_MODELS:
             if m not in ordered:
                 ordered.append(m)
-
-        print(f"[Gemini] Auto-discovered active models (top 5): {ordered[:5]}")
         return ordered[:8]
-    except Exception as e:
-        print(f"[Gemini] Model discovery warning: {e}")
+    except Exception:
         return FALLBACK_MODELS
 
 
@@ -83,93 +109,138 @@ def _extract_json(text):
 
 
 def _clean_narration(text):
-    text = re.sub(r"[*_`#~>|\[\]]", "", text)
+    text = re.sub(r"[*_`#~>|[\]]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
+def _build_mode_instructions(mode, is_shorts):
+    if mode == "trending_viral":
+        badge_examples = '"VIRAL TREND", "TRENDING NOW", "HOT TOPIC"'
+        role_desc = (
+            "Viral Trend & Culture Producer — capturing whatever is genuinely trending right now "
+            "(games, pop culture, viral moments, or major US talking points) with sharp, human commentary."
+        )
+        if is_shorts:
+            structure = """
+   - Scene 1: Immediate 3-second hook naming what is blowing up right now and why it matters.
+   - Scenes 2-4: Key details, public/creator reaction, and the real twist.
+   - Scene 5: Sharp punchline + viewer question + Quick Shift Creative CTA."""
+        else:
+            structure = """
+   Structure the 36 scenes around the #1 non-news viral/trending topic exploding right now:
+   - Scenes 1-3 (Cold Hook): Open right on the viral wave and why people cannot stop talking about it.
+   - Scenes 4-10 (What Sparked It): How the trend or game/creator moment took off so fast.
+   - Scenes 11-18 (Internet & Crowd Reaction): Real perspectives, debates, and funny/intense moments around it.
+   - Scenes 19-26 (Why It Hit So Hard): Psychological, cultural, or market reasons behind the hype.
+   - Scenes 27-33 (Where It Goes Next): Will it fade in a week or reshape the space?
+   - Scenes 34-36 (Closing Take): Honest wrap-up, comment question, and Quick Shift Creative subscribe cue."""
+        return role_desc, badge_examples, structure
+
+    if mode == "deep_dive_evergreen":
+        badge_examples = '"HIGH RPM BRIEF", "DEEP DIVE", "MONEY & TECH"'
+        role_desc = (
+            "High-RPM Evergreen & Subscriber Growth Strategist — crafting high-retention stories "
+            "with strong reach and subscriber appeal across finance, AI/tech strategy, business models, and high-interest topics."
+        )
+        if is_shorts:
+            structure = """
+   - Scene 1: High-curiosity money/strategy or high-reach hook.
+   - Scenes 2-4: Clear, memorable breakdown of how it works or why it matters.
+   - Scene 5: Strong takeaway + Quick Shift Creative subscribe cue."""
+        else:
+            structure = """
+   Structure the 36 scenes for maximum watch time, US RPM, and subscriber conversion:
+   - Scenes 1-3 (Irresistible Hook): Start with a striking insight, number, or question that pulls viewers in.
+   - Scenes 4-10 (Origin & Core Mechanics): Explain the backstory and how the system/business actually operates.
+   - Scenes 11-18 (The Numbers & Leverage): Break down margins, incentives, market forces, or key comparisons.
+   - Scenes 19-26 (Hidden Bottlenecks & Competition): What most people overlook and how rivals respond.
+   - Scenes 27-33 (Future Outlook): Realistic scenarios and what to watch next.
+   - Scenes 34-36 (Final Takeaway): Crisp summary, comment prompt, and Quick Shift Creative subscribe cue."""
+        return role_desc, badge_examples, structure
+
+    badge_examples = '"DAILY BULLETIN", "MARKETS & TECH", "GAMING & AI"'
+    role_desc = (
+        "Broadcast News & Markets Anchor — covering Gaming, Tech, AI, and Business/Market news "
+        "in a natural, conversational human voice."
+    )
+    if is_shorts:
+        structure = """
+   - Scene 1: Fast breaking hook across Gaming, Tech, AI, or Market/Business news.
+   - Scenes 2-4: Key numbers, market reaction (green/red candles or business impact), and core facts.
+   - Scene 5: Bottom-line takeaway + Quick Shift Creative CTA."""
+    else:
+        structure = """
+   Structure the 36 scenes as a multi-segment briefing covering Gaming, Tech, AI, and Business/Market news:
+   - Scenes 1-3 (Opening Briefing): Tease the key stories across Tech/AI, Gaming, and Markets without cliché intros.
+   - Scenes 4-11 (Tech & AI Segment): Key product, model, or infrastructure developments and real-world impact.
+   - Scenes 12-19 (Gaming Segment): Major game, studio, or industry updates and why players care.
+   - Scenes 20-27 (Market & Business Segment): Stock/index moves (red/green candle shifts), earnings, and business strategy.
+   - Scenes 28-33 (Cross-Sector Connections): How tech, AI, gaming, and capital markets intersect right now.
+   - Scenes 34-36 (Sign-Off): Concise wrap-up, audience question, and Quick Shift Creative subscribe cue."""
+    return role_desc, badge_examples, structure
+
+
 def generate_video_blueprint(trending_topics, custom_topic=""):
     if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is missing! Add it to GitHub Secrets or config.env.")
+        raise RuntimeError("GEMINI_API_KEY is missing!")
+
+    content_mode = os.getenv("CONTENT_MODE", "news_bulletin").strip().lower()
+    if content_mode not in ("news_bulletin", "trending_viral", "deep_dive_evergreen"):
+        content_mode = "news_bulletin"
 
     is_shorts = VIDEO_FORMAT == "shorts"
     scene_count = "5" if is_shorts else "36"
     words_per_scene = "22-28" if is_shorts else "38-45"
     duration_hint = (
-        "45-55 seconds total (fast-paced US YouTube Shorts news bulletin)"
+        "45-55 seconds total (fast-paced YouTube Shorts)"
         if is_shorts
-        else "8.5 to 10 minutes total (~1,400 to 1,550 spoken words — high-retention US Tech/AI/Gaming Deep-Dive)"
+        else "8.5 to 10 minutes total (~1,400 to 1,550 spoken words)"
     )
 
-    if custom_topic:
-        topic_block = f"MANDATORY BREAKING TOPIC: {custom_topic}"
-    else:
-        topics_list = "\n".join(f"- {t}" for t in trending_topics)
-        category_note = (
-            f"Focus strictly on the '{NEWS_CATEGORY.upper()}' category if available."
-            if NEWS_CATEGORY != "auto"
-            else "Prioritize the #1 most viral US & Worldwide Tech, AI, or Gaming breaking story."
-        )
-        topic_block = (
-            f"LIVE US TRENDS & WORLDWIDE TECH / AI / GAMING NEWS BULLETINS RIGHT NOW:\n"
-            f"{category_note}\n"
-            f"Pick the SINGLE highest-CTR, most shareable breaking story for a US and global audience:\n"
-            + topics_list
-        )
+    memory = load_strategy_memory()
+    mem_hint = (
+        f"Self-Learning Channel Memory -> Winning topics/angles: {', '.join(memory.get('winning_topics', [])[:4])}. "
+        f"Avoid: {', '.join(memory.get('avoid_patterns', [])[:3])}."
+    )
 
+    extra_headlines = [] if custom_topic else _fetch_extra_mode_headlines(content_mode)
+    combined_topics = []
+    for t in extra_headlines + (trending_topics or []):
+        if t and t not in combined_topics:
+            combined_topics.append(t)
+
+    if custom_topic:
+        topic_block = f"MANDATORY TOPIC: {custom_topic}"
+    else:
+        topics_list = "\n".join(f"- {t}" for t in combined_topics[:28])
+        topic_block = f"LIVE HEADLINES & TRENDS:\n{topics_list}"
+
+    role_desc, badge_examples, structure_guide = _build_mode_instructions(content_mode, is_shorts)
     format_label = "YouTube Shorts (9:16 vertical)" if is_shorts else "Long-Form Horizontal YouTube Video (16:9, 8-10 minutes)"
     shorts_hash = " and #Shorts" if is_shorts else ""
 
-    if is_shorts:
-        structure_guide = """
-   - Scene 1: Instant 3-second breaking-news hook.
-   - Scenes 2-4: Key facts, numbers, and global impact.
-   - Scene 5: Sharp verdict + Subscribe CTA."""
-    else:
-        structure_guide = """
-   Structure the 36 scenes like a top US YouTube tech/gaming documentary (ColdFusion / TechLinked / Gameranx pacing):
-   - Scenes 1-3 (The Hook): Explosive cold open with the shocking headline, exact numbers/stakes, and a compelling reason to watch till the end. (NEVER say "Hey guys welcome back".)
-   - Scenes 4-10 (What Just Happened): Full detailed breakdown of the breaking announcement, specs, leaks, pricing, or release details.
-   - Scenes 11-18 (The Hidden Backstory): Why this happened right now, past industry mistakes or breakthroughs, and how rival giants (NVIDIA, OpenAI, Apple, Microsoft, Sony, Rockstar, etc.) are connected.
-   - Scenes 19-26 (Deep Impact Analysis): How this actually changes things for everyday US consumers, developers, gamers, and Wall Street / the global market.
-   - Scenes 27-33 (Controversies, Risks & What Comes Next): Real criticism, potential flaws, bold predictions for 2026-2027, and what competitors will do to strike back.
-   - Scenes 34-36 (Final Verdict & Community Engagement): Memorable takeaway, a sharp debate question for the comments section, and a smooth Subscribe CTA for Quick Shift Creative."""
+    prompt = f"""You are the {role_desc} for "{CHANNEL_NAME}".
+{mem_hint}
 
-    prompt = f"""You are the Executive Producer, Lead Documentary Scriptwriter, and YouTube SEO Director for "{CHANNEL_NAME}" — a premier US-based YouTube channel delivering in-depth US Trends and Worldwide Tech, AI, and Gaming analysis.
+Active Mode: {content_mode.upper()}
+Format: {format_label}
+Target Length: {duration_hint}
+Number of Scenes: EXACTLY {scene_count} scenes. Output ALL {scene_count} scenes!
 
 {topic_block}
 
-Target Audience: 100% US & Global English-speaking viewers (natural, sharp, authoritative American English — zero fluff, zero filler, constant curiosity loops between sections).
-Format: {format_label}
-Target Length: {duration_hint}
-Number of Scenes: EXACTLY {scene_count} scenes. Do NOT stop early — you MUST output all {scene_count} scenes!
+Human-Like Writing Rules (CRITICAL):
+- Sound like an articulate, sharp human creator/analyst speaking naturally — NOT an AI template.
+- NEVER use AI clichés such as: "delve", "game-changer", "landscape", "buckle up", "revolutionary", "let's dive in", "in conclusion", "ever-evolving", "tapestry", "testament".
+- Vary sentence lengths naturally (mix short punchy sentences with clear explanatory sentences).
+- NO emojis, NO markdown, NO stage directions in narration.
 
-Requirements:
-1. Select ONE blockbuster breaking story from the live headlines (or use the mandatory topic).
-2. Classify the story into exact "category": one of "ai", "tech", or "gaming".
-3. Choose a short 2-word uppercase "bulletin_badge" for the thumbnail corner (e.g., "AI DEEP DIVE", "TECH ALERT", "GAMING NEWS", "US TRENDING").
-4. Create an ultra-high-CTR US YouTube Title (max 82 characters, main trending keyword/company/game right at the start, strong curiosity gap, zero fake clickbait).
-5. Create a complete US/Global SEO-optimized YouTube Description:
-   - Punchy 2-line hook packed with high-volume US search keywords
-   - 5 concise bullet-point highlights covered in this deep dive
-   - Subscribe CTA for "{CHANNEL_NAME}"
-   - 6 high-traffic hashtags at the bottom (#QuickShiftCreative #TechNews #AINews #GamingNews #USTrends{shorts_hash})
-6. Create 15 high-search-volume US/Global YouTube SEO tags (array of short strings, NO # symbols).
-7. Create high-CTR Thumbnail copy:
-   - thumbnail_headline: 2 to 4 BOLD ALL-CAPS punchy words (max 22 chars total).
-   - thumbnail_subtext: 2 to 4 short supporting words (max 24 chars, e.g., "EVERYTHING CHANGES", "FULL BREAKDOWN", "HUGE LEAK").
-   - thumbnail_query: 2 simple English words for a dramatic Pixabay photo (e.g., "futuristic microchip", "gaming setup", "cyberpunk neon").
-8. Write EXACTLY {scene_count} tightly paced scenes:
-{structure_guide}
-   - Each scene MUST include:
-     * "narration": {words_per_scene} spoken words in smooth, conversational US broadcast English (NO emojis, NO markdown, NO stage directions, NO scene numbers spoken aloud).
-     * "visual_query": 2 simple, DIFFERENT English keywords per scene for Pixabay HD stock video (NEVER repeat the same visual_query in nearby scenes — vary between hardware, coding, data center, neon city, gaming setup, smartphone, stock chart, robotics, astronaut, studio desk, server rack, esports arena, microchip, laboratory, futuristic car, etc.).
-
-Return ONLY a valid JSON object matching this exact schema:
+Return ONLY valid JSON:
 {{
   "chosen_topic": "string",
-  "category": "ai",
-  "bulletin_badge": "AI DEEP DIVE",
+  "category": "tech",
+  "bulletin_badge": "DAILY BULLETIN",
   "title": "string",
   "description": "string",
   "tags": ["tag1", "tag2"],
@@ -188,7 +259,7 @@ Return ONLY a valid JSON object matching this exact schema:
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.72,
+            "temperature": 0.75,
             "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
         },
@@ -200,43 +271,31 @@ Return ONLY a valid JSON object matching this exact schema:
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
         try:
-            print(f"[Gemini] Building 8-10 min US Deep-Dive with {model}...")
             resp = requests.post(url, json=payload, timeout=120)
             if resp.status_code != 200:
-                last_error = f"{model} HTTP {resp.status_code}: {resp.text[:300]}"
-                print(f"[Gemini] Fallback triggered: {last_error}")
+                last_error = f"{model} HTTP {resp.status_code}: {resp.text[:250]}"
                 continue
-            data = resp.json()
-            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+            raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
             blueprint = _extract_json(raw_text)
-
             if not blueprint.get("title") or not blueprint.get("scenes"):
-                raise ValueError("Missing title or scenes in Gemini output.")
+                raise ValueError("Missing title or scenes")
 
             cat = str(blueprint.get("category", "tech")).strip().lower()
             blueprint["category"] = cat if cat in ("ai", "tech", "gaming") else "tech"
-            blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "TECH DEEP DIVE")).upper().strip()[:18]
-
+            blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "DAILY BULLETIN")).upper().strip()[:18]
             blueprint["title"] = blueprint["title"].strip()[:98]
-            if is_shorts and "#shorts" not in blueprint["title"].lower():
-                if len(blueprint["title"]) <= 90:
-                    blueprint["title"] += " #Shorts"
+            if is_shorts and "#shorts" not in blueprint["title"].lower() and len(blueprint["title"]) <= 90:
+                blueprint["title"] += " #Shorts"
 
-            for scene in blueprint["scenes"]:
-                scene["narration"] = _clean_narration(scene.get("narration", ""))
-                scene["visual_query"] = scene.get("visual_query", "futuristic technology").strip()
+            for sc in blueprint["scenes"]:
+                sc["narration"] = _clean_narration(sc.get("narration", ""))
+                sc["visual_query"] = sc.get("visual_query", "technology").strip()
 
             blueprint["scenes"] = [s for s in blueprint["scenes"] if s["narration"]]
             if not blueprint["scenes"]:
-                raise ValueError("All generated scenes had empty narration.")
-
-            total_words = sum(len(s["narration"].split()) for s in blueprint["scenes"])
-            print(f"[Gemini] Chosen Story ({blueprint['category'].upper()}): {blueprint.get('chosen_topic')}")
-            print(f"[Gemini] Generated {len(blueprint['scenes'])} scenes (~{total_words} words)")
-            print(f"[Gemini] SEO Title: {blueprint['title']}")
+                raise ValueError("Empty scenes")
             return blueprint
         except Exception as e:
             last_error = f"{model} error: {e}"
-            print(f"[Gemini] {last_error}")
 
     raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
