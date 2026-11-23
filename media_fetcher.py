@@ -1,101 +1,159 @@
 import os
-import random
+import re
 import urllib.parse
 import requests
-from config import PIXABAY_API_KEY, VIDEO_FORMAT
+from bs4 import BeautifulSoup
+from PIL import Image
+from config import PIXABAY_API_KEY
 
-FALLBACK_QUERIES = [
-    "futuristic technology",
-    "artificial intelligence",
-    "gaming computer",
-    "digital circuit",
-    "cyberpunk neon",
-    "server room",
-]
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
-def _download_file(url, dest_path):
-    resp = requests.get(url, stream=True, timeout=45)
+def _download_file(url, dest_path, timeout=25):
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout, stream=True)
     resp.raise_for_status()
     with open(dest_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024 * 64):
+        for chunk in resp.iter_content(chunk_size=65536):
             if chunk:
                 f.write(chunk)
-    return dest_path
+    return os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024
 
 
-def fetch_stock_video(query, dest_path, used_ids=None):
-    """Fetch an HD Tech/AI/Gaming stock video from Pixabay. Falls back to HD image if needed."""
-    if used_ids is None:
-        used_ids = set()
-    if not PIXABAY_API_KEY:
-        raise RuntimeError("PIXABAY_API_KEY is missing! Add it to GitHub Secrets or config.env.")
+def fetch_stock_image(query, out_path):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    q = (query or "technology").strip()
 
-    queries_to_try = [query] + [q for q in query.split()[:1] if len(q) > 3] + [random.choice(FALLBACK_QUERIES)]
-
-    for q in queries_to_try:
-        encoded = urllib.parse.quote(q)
-        url = (
-            f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}"
-            f"&q={encoded}&per_page=10&safesearch=true&video_type=film"
-        )
+    if PEXELS_API_KEY:
         try:
-            resp = requests.get(url, timeout=20)
-            if resp.status_code != 200:
-                continue
-            hits = resp.json().get("hits", [])
-            random.shuffle(hits)
-            for hit in hits:
-                vid_id = hit.get("id")
-                if vid_id in used_ids:
-                    continue
-                videos = hit.get("videos", {})
-                candidate = (
-                    videos.get("medium", {}).get("url")
-                    or videos.get("large", {}).get("url")
-                    or videos.get("small", {}).get("url")
-                )
-                if candidate:
-                    used_ids.add(vid_id)
-                    _download_file(candidate, dest_path)
-                    print(f"[Pixabay] Downloaded stock video for '{q}' (id={vid_id})")
-                    return dest_path, "video"
+            r = requests.get(
+                "https://api.pexels.com/v1/search",
+                headers={"Authorization": PEXELS_API_KEY, "User-Agent": USER_AGENT},
+                params={"query": q, "per_page": 6, "orientation": "landscape"},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                photos = r.json().get("photos", [])
+                for p in photos:
+                    src_url = p.get("src", {}).get("large2x") or p.get("src", {}).get("large")
+                    if src_url and _download_file(src_url, out_path):
+                        return out_path
         except Exception as e:
-            print(f"[Pixabay] Video search warning for '{q}': {e}")
+            print(f"[Media] Pexels image fallback: {e}")
 
-    img_path = os.path.splitext(dest_path)[0] + ".jpg"
-    fetched_img = fetch_stock_image(query, img_path)
-    if fetched_img:
-        return fetched_img, "image"
-    return None, "fallback"
+    if PIXABAY_API_KEY:
+        try:
+            r = requests.get(
+                "https://pixabay.com/api/",
+                params={
+                    "key": PIXABAY_API_KEY,
+                    "q": q,
+                    "image_type": "photo",
+                    "per_page": 6,
+                    "safesearch": "true",
+                },
+                timeout=15,
+            )
+            if r.status_code == 200:
+                hits = r.json().get("hits", [])
+                for h in hits:
+                    u = h.get("largeImageURL") or h.get("webformatURL")
+                    if u and _download_file(u, out_path):
+                        return out_path
+        except Exception as e:
+            print(f"[Media] Pixabay image fallback: {e}")
+
+    img = Image.new("RGB", (1920, 1080), (12, 15, 22))
+    img.save(out_path, "JPEG", quality=90)
+    return out_path
 
 
-def fetch_stock_image(query, dest_path):
-    """Fetch a high-resolution Tech/AI/Gaming image from Pixabay."""
-    if not PIXABAY_API_KEY:
+def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
+    os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
+    if used_urls is None:
+        used_urls = set()
+
+    q = (query or "futuristic technology").strip()
+    orientation = "portrait" if is_shorts else "landscape"
+
+    if PEXELS_API_KEY:
+        try:
+            r = requests.get(
+                "https://api.pexels.com/videos/search",
+                headers={"Authorization": PEXELS_API_KEY, "User-Agent": USER_AGENT},
+                params={"query": q, "per_page": 10, "orientation": orientation},
+                timeout=18,
+            )
+            if r.status_code == 200:
+                vids = r.json().get("videos", [])
+                for v in vids:
+                    files = v.get("video_files", [])
+                    mp4s = [vf for vf in files if vf.get("file_type") == "video/mp4" and vf.get("link")]
+                    mp4s.sort(key=lambda x: abs((x.get("width") or 1280) - (1080 if is_shorts else 1920)))
+                    for vf in mp4s[:3]:
+                        link = vf["link"]
+                        if link in used_urls:
+                            continue
+                        if _download_file(link, out_mp4, timeout=30):
+                            used_urls.add(link)
+                            return out_mp4
+        except Exception as e:
+            print(f"[Media] Pexels video warning ({q}): {e}")
+
+    if PIXABAY_API_KEY:
+        try:
+            r = requests.get(
+                "https://pixabay.com/api/videos/",
+                params={"key": PIXABAY_API_KEY, "q": q, "per_page": 10, "safesearch": "true"},
+                timeout=18,
+            )
+            if r.status_code == 200:
+                hits = r.json().get("hits", [])
+                for h in hits:
+                    vdict = h.get("videos", {})
+                    for quality in ("large", "medium", "small"):
+                        vinfo = vdict.get(quality, {})
+                        link = vinfo.get("url")
+                        if link and link not in used_urls:
+                            if _download_file(link, out_mp4, timeout=30):
+                                used_urls.add(link)
+                                return out_mp4
+        except Exception as e:
+            print(f"[Media] Pixabay video warning ({q}): {e}")
+
+    return None
+
+
+def fetch_article_image(topic_query, out_path):
+    if not topic_query:
         return None
-
-    orientation = "vertical" if VIDEO_FORMAT == "shorts" and "thumb" not in dest_path.lower() else "horizontal"
-    queries_to_try = [query, random.choice(FALLBACK_QUERIES), "dark futuristic technology"]
-
-    for q in queries_to_try:
-        encoded = urllib.parse.quote(q)
-        url = (
-            f"https://pixabay.com/api/?key={PIXABAY_API_KEY}"
-            f"&q={encoded}&image_type=photo&orientation={orientation}&per_page=10&safesearch=true"
-        )
+    try:
+        q_enc = urllib.parse.quote_plus(topic_query[:90])
+        rss_url = f"https://news.google.com/rss/search?q={q_enc}&hl=en-US&gl=US&ceid=US:en"
+        r = requests.get(rss_url, headers={"User-Agent": USER_AGENT}, timeout=10)
+        if r.status_code != 200:
+            return None
+        m = re.search(r"<link>(https?://[^<]+)</link>", r.text)
+        if not m:
+            return None
+        art_url = m.group(1)
+        page = requests.get(art_url, headers={"User-Agent": USER_AGENT}, timeout=10, allow_redirects=True)
+        if page.status_code != 200:
+            return None
+        soup = BeautifulSoup(page.text, "html.parser")
+        og = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "twitter:image"})
+        img_url = og.get("content") if og else ""
+        if img_url and img_url.startswith("http"):
+            if _download_file(img_url, out_path, timeout=15):
+                with Image.open(out_path) as im:
+                    w, h = im.size
+                    if w >= 400 and h >= 220:
+                        return out_path
+    except Exception:
+        pass
+    if os.path.exists(out_path):
         try:
-            resp = requests.get(url, timeout=20)
-            if resp.status_code != 200:
-                continue
-            hits = resp.json().get("hits", [])
-            if hits:
-                pick = random.choice(hits[:5])
-                img_url = pick.get("largeImageURL") or pick.get("webformatURL")
-                if img_url:
-                    _download_file(img_url, dest_path)
-                    print(f"[Pixabay] Downloaded image for '{q}'")
-                    return dest_path
-        except Exception as e:
-            print(f"[Pixabay] Image search warning for '{q}': {e}")
+            os.remove(out_path)
+        except Exception:
+            pass
     return None
