@@ -1,13 +1,13 @@
-name: My automation YT - Quick Shift Creative (3 Long + 3 Shorts US)
+name: My automation YT - Quick Shift Creative (2 Long + 4 Shorts Pro)
 
 on:
   schedule:
-    - cron: '15 13 * * *'  # Slot 1: 8:15 AM EST  (6:45 PM IST)  | SHORT  - News Bulletin
-    - cron: '15 16 * * *'  # Slot 2: 11:15 AM EST (9:45 PM IST)  | LONG   - Full News Bulletin
-    - cron: '15 19 * * *'  # Slot 3: 2:15 PM EST  (12:45 AM IST) | SHORT  - Trending Games/Gamers & Viral
-    - cron: '15 22 * * *'  # Slot 4: 5:15 PM EST  (3:45 AM IST)  | LONG   - Trending Games/Gamers Deep Dive
-    - cron: '15 1 * * *'   # Slot 5: 8:15 PM EST  (6:45 AM IST)  | LONG   - Evergreen High-RPM Deep Dive
-    - cron: '15 4 * * *'   # Slot 6: 11:15 PM EST (9:45 AM IST)  | SHORT  - Evergreen Tech/AI/Business Short
+    - cron: '15 13 * * *'  # Slot 1: 8:15 AM EST  (6:45 PM IST)  | SHORT  - News Bulletin (Gaming/Tech/AI/Market)
+    - cron: '15 16 * * *'  # Slot 2: 11:15 AM EST (9:45 PM IST)  | SHORT  - Trending Viral Topic
+    - cron: '15 19 * * *'  # Slot 3: 2:15 PM EST  (12:45 AM IST) | LONG   - News Bulletin (8-10 min)
+    - cron: '15 22 * * *'  # Slot 4: 5:15 PM EST  (3:45 AM IST)  | SHORT  - Trending Viral Topic
+    - cron: '15 1 * * *'   # Slot 5: 8:15 PM EST  (6:45 AM IST)  | LONG   - High-RPM / Reach / Subscriber Growth
+    - cron: '15 4 * * *'   # Slot 6: 11:15 PM EST (9:45 AM IST)  | SHORT  - High-RPM / Reach / Subscriber Short
   workflow_dispatch:
     inputs:
       content_mode:
@@ -22,9 +22,10 @@ on:
       video_format:
         description: 'Video Format'
         required: true
-        default: 'horizontal'
+        default: 'auto'
         type: choice
         options:
+          - auto
           - horizontal
           - shorts
       news_category:
@@ -89,7 +90,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Configure Daily US Slot (3 Long + 3 Shorts)
+      - name: Configure Daily US Slot (2 Long + 4 Shorts)
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
@@ -108,19 +109,19 @@ jobs:
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
               "15 16 * * *")
+                echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
+                echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
+                ;;
+              "15 19 * * *")
                 echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
                 echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
-              "15 19 * * *")
+              "15 22 * * *")
                 echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
                 echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
-                echo "NEWS_CATEGORY=gaming" >> $GITHUB_ENV
-                ;;
-              "15 22 * * *")
-                echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
-                echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
-                echo "NEWS_CATEGORY=gaming" >> $GITHUB_ENV
+                echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
               "15 1 * * *")
                 echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
@@ -133,7 +134,7 @@ jobs:
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
               *)
-                echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
+                echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
                 echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
@@ -142,7 +143,7 @@ jobs:
             echo "PRIVACY_STATUS=public" >> $GITHUB_ENV
             echo "CUSTOM_TOPIC=" >> $GITHUB_ENV
           else
-            echo "VIDEO_FORMAT=${IN_FORMAT:-horizontal}" >> $GITHUB_ENV
+            echo "VIDEO_FORMAT=${IN_FORMAT:-auto}" >> $GITHUB_ENV
             echo "CONTENT_MODE=${IN_MODE:-news_bulletin}" >> $GITHUB_ENV
             echo "NEWS_CATEGORY=${IN_CATEGORY:-auto}" >> $GITHUB_ENV
             echo "VOICE_STYLE=${IN_VOICE:-auto}" >> $GITHUB_ENV
@@ -150,21 +151,20 @@ jobs:
             echo "CUSTOM_TOPIC=${IN_TOPIC}" >> $GITHUB_ENV
           fi
 
-      - name: Run My automation YT (Quick Shift Creative - US Edition)
+      - name: Run My automation YT (Quick Shift Creative - Pro)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
         run: |
           echo "Active Slot -> Format: $VIDEO_FORMAT | Mode: $CONTENT_MODE | Category: $NEWS_CATEGORY | Privacy: $PRIVACY_STATUS"
           python main.py
 
-      - name: Save video history (prevent duplicate topics)
+      - name: Save video history & self-learning memory
         if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "Quick Shift Creative Bot"
-          if [ -f history.json ]; then
-            git add history.json
-            git diff --cached --quiet || (git commit -m "chore: update published video history" && git pull --rebase && git push)
-          fi
+          git add -f history.json strategy_memory.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "chore: update video history & self-learning memory" && git pull --rebase && git push)
