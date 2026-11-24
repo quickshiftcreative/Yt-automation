@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-11-24T11:31:28.004483+00:00",
+  "updated_at": "2026-11-24T14:30:21.283522+00:00",
   "winning_topics": [
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans #Shorts",
     "OpenAI's Chief Scientist Demands Limits on AI Development NOW! #Shorts",
     "Signal Bans Screenshots to Stop AI Surveillance Threat! #Shorts",
     "BERKSHIRE HATHAWAY: Warren Buffett's Secret $148B AI Stock Bet Revealed! #Shorts",
-    "AI Doesn't Work Like the Human Brain: New Discovery Changes Everything"
+    "Jensen Huang Returns: Nvidia Soars 31% #Shorts"
   ],
   "avoid_patterns": [
     "generic filler intros",
     "repetitive stock loops"
   ],
   "preferred_format": "auto",
-  "shorts_score": 170.0,
+  "shorts_score": 144.0,
   "long_score": 1.5,
   "notes": "Self-learning engine initialized for Quick Shift Creative."
 }
