@@ -15,18 +15,18 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
-def _download_file(url, dest_path, timeout=25):
+def _download_file(url, dest_path, timeout=25, min_bytes=1024):
     resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout, stream=True)
     resp.raise_for_status()
     with open(dest_path, "wb") as f:
         for chunk in resp.iter_content(chunk_size=65536):
             if chunk:
                 f.write(chunk)
-    return os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024
+    return os.path.exists(dest_path) and os.path.getsize(dest_path) > min_bytes
 
 
 def fetch_freesound_sfx(query, out_mp3):
-    """Fetches a real studio-recorded CC0 sound effect (0.2s-3.5s) from Freesound API."""
+    """Fetches a short studio-recorded CC0 sound effect (0.2s-3.5s) from Freesound API."""
     if not FREESOUND_API_KEY:
         return None
     os.makedirs(os.path.dirname(out_mp3), exist_ok=True)
@@ -45,7 +45,6 @@ def fetch_freesound_sfx(query, out_mp3):
             timeout=15,
         )
         if r.status_code != 200:
-            print(f"[Freesound] HTTP {r.status_code} for '{query}'")
             return None
         results = r.json().get("results", [])
         if not results:
@@ -54,7 +53,7 @@ def fetch_freesound_sfx(query, out_mp3):
         for item in results[:4]:
             previews = item.get("previews", {})
             mp3_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
-            if mp3_url and _download_file(mp3_url, out_mp3, timeout=20):
+            if mp3_url and _download_file(mp3_url, out_mp3, timeout=20, min_bytes=1024):
                 print(f"[Freesound] CC0 SFX: {item.get('name', query)}")
                 return out_mp3
     except Exception as e:
@@ -62,8 +61,50 @@ def fetch_freesound_sfx(query, out_mp3):
     return None
 
 
+def fetch_freesound_music(query, out_mp3):
+    """Fetches a full-length CC0 copyright-free background music track (35s-240s) from Freesound API."""
+    if not FREESOUND_API_KEY:
+        return None
+    os.makedirs(os.path.dirname(out_mp3), exist_ok=True)
+    search_queries = [
+        (query or "ambient technology background").strip(),
+        "ambient electronic background loop",
+    ]
+    for q in search_queries:
+        try:
+            r = requests.get(
+                "https://freesound.org/apiv2/search/text/",
+                params={
+                    "query": q,
+                    "filter": 'license:"Creative Commons 0" duration:[35 TO 240]',
+                    "fields": "id,name,duration,previews",
+                    "sort": "rating_desc",
+                    "page_size": 10,
+                    "token": FREESOUND_API_KEY,
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=18,
+            )
+            if r.status_code != 200:
+                continue
+            results = r.json().get("results", [])
+            if not results:
+                continue
+            random.shuffle(results)
+            for item in results[:5]:
+                previews = item.get("previews", {})
+                mp3_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
+                if mp3_url and _download_file(mp3_url, out_mp3, timeout=35, min_bytes=40960):
+                    dur_val = float(item.get("duration", 0))
+                    print(f"[FreesoundMusic] Downloaded CC0 BGM: {item.get('name', q)} ({dur_val:.0f}s)")
+                    return out_mp3
+        except Exception as e:
+            print(f"[FreesoundMusic] Warning ({q}): {e}")
+    return None
+
+
 def fetch_giphy_sticker(query, out_gif):
-    """Fetches a real transparent sticker or reaction GIF from Giphy API."""
+    """Fetches a transparent sticker or reaction GIF from Giphy API."""
     if not GIPHY_API_KEY:
         return None
     os.makedirs(os.path.dirname(out_gif), exist_ok=True)
@@ -100,7 +141,6 @@ def fetch_giphy_sticker(query, out_gif):
                     try:
                         with Image.open(out_gif) as im:
                             if im.size[0] >= 80 and im.size[1] >= 80:
-                                print(f"[Giphy] Fetched reaction visual for '{q}'")
                                 return out_gif
                     except Exception:
                         pass
@@ -116,7 +156,6 @@ def fetch_giphy_sticker(query, out_gif):
 
 
 def fetch_unsplash_photo(query, out_path, orientation="landscape", used_urls=None):
-    """Fetches an editorial HD photo from Unsplash API."""
     if not UNSPLASH_ACCESS_KEY:
         return None
     if used_urls is None:
@@ -140,8 +179,7 @@ def fetch_unsplash_photo(query, out_path, orientation="landscape", used_urls=Non
             timeout=15,
         )
         if r.status_code == 200:
-            results = r.json().get("results", [])
-            for item in results:
+            for item in r.json().get("results", []):
                 urls = item.get("urls", {})
                 u = urls.get("regular") or urls.get("full")
                 if u and u not in used_urls:
@@ -154,7 +192,6 @@ def fetch_unsplash_photo(query, out_path, orientation="landscape", used_urls=Non
 
 
 def fetch_stock_image(query, out_path, orientation="landscape", used_urls=None):
-    """Fetches a high-res photo from Unsplash -> Pexels -> Pixabay."""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     q = (query or "technology").strip()
 
@@ -211,7 +248,6 @@ def fetch_stock_image(query, out_path, orientation="landscape", used_urls=None):
 
 
 def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
-    """Fetches a unique HD stock video clip from Pexels or Pixabay avoiding used_urls."""
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
     if used_urls is None:
         used_urls = set()
@@ -266,7 +302,6 @@ def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
 
 
 def fetch_article_image(topic_query, out_path):
-    """Fetches a real press/news image via Google News RSS + og:image meta tag."""
     if not topic_query:
         return None
     try:
