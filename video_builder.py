@@ -5,16 +5,16 @@ import subprocess
 from PIL import Image, ImageDraw, ImageFont
 from config import VIDEO_FORMAT
 from chart_animator import render_animated_candlestick_clip
-from media_fetcher import fetch_broll_clip
+from media_fetcher import (
+    fetch_broll_clip,
+    fetch_freesound_sfx,
+    fetch_giphy_sticker,
+    fetch_stock_image,
+)
 
 
 def _repo_root():
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _asset_path(*parts):
-    p = os.path.join(_repo_root(), "assets", *parts)
-    return p if os.path.exists(p) else None
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 def _all_sfx_files():
@@ -57,9 +57,9 @@ def _pick_music_bed(mode, is_shorts, rng):
                 return f
 
     pref_map = {
-        "news_bulletin": ["06_market_wallstreet_news", "10_breaking_news_urgency", "08_business_luxury_rpm"],
-        "trending_viral": ["04_gaming_cyber_hype", "12_viral_debate_groove", "01_hook_tension_pulse"],
-        "deep_dive_evergreen": ["02_tech_dark_ambient", "03_ai_neural_pulse", "08_business_luxury_rpm", "09_lofi_tech_explainer"],
+        "news_bulletin": ["06_market", "10_breaking", "08_business", "08_luxury"],
+        "trending_viral": ["04_gaming", "12_viral", "01_hook"],
+        "deep_dive_evergreen": ["02_tech", "03_ai", "08_business", "08_luxury", "09_lofi"],
     }
     for key in pref_map.get(mode, []):
         for f in files:
@@ -68,20 +68,7 @@ def _pick_music_bed(mode, is_shorts, rng):
     return rng.choice(files)
 
 
-def _find_font(size, style="bold"):
-    f_dir = os.path.join(_repo_root(), "assets", "fonts")
-    name_map = {
-        "impact": ["Impact_Condensed_Black.ttf", "Impact_Display_Black.ttf"],
-        "mono": ["Ticker_Mono_Bold.ttf", "Ticker_Mono_Regular.ttf"],
-        "bold": ["Modern_Lato_Black.ttf", "Modern_Lato_Bold.ttf"],
-    }
-    for fn in name_map.get(style, ["Modern_Lato_Black.ttf"]):
-        p = os.path.join(f_dir, fn)
-        if os.path.exists(p):
-            try:
-                return ImageFont.truetype(p, size)
-            except Exception:
-                pass
+def _find_font(size):
     for sys_f in [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -106,19 +93,19 @@ def _create_motion_card_png(out_png, width, height, title_text, body_text, card_
     acc_col, bg_col, txt_col = palette.get(accent, palette["gold"])
 
     box_w = min(int(width * 0.84), 980)
-    box_h = 230 if card_type != "news" else 270
+    box_h = 225 if card_type != "news" else 260
     x0 = (width - box_w) // 2
-    y0 = int(height * 0.14) if height > width else int(height * 0.16)
+    y0 = int(height * 0.14) if height > width else int(height * 0.15)
     x1 = x0 + box_w
     y1 = y0 + box_h
 
     draw.rounded_rectangle([x0, y0, x1, y1], radius=22, fill=bg_col, outline=acc_col, width=3)
     draw.rounded_rectangle([x0, y0, x0 + 14, y1], radius=7, fill=acc_col)
 
-    f_hdr = _find_font(24, "mono")
-    f_bdy = _find_font(38, "bold")
+    f_hdr = _find_font(22)
+    f_bdy = _find_font(36)
 
-    hdr_lbl = "MARKET & STAT CALLOUT" if card_type == "stat" else "VERIFIED REPORT"
+    hdr_lbl = "MARKET & STAT CALLOUT" if card_type == "stat" else "KEY INSIGHT"
     draw.text((x0 + 34, y0 + 22), hdr_lbl, fill=acc_col, font=f_hdr)
 
     words = (body_text or title_text or "").split()
@@ -137,16 +124,17 @@ def _create_motion_card_png(out_png, width, height, title_text, body_text, card_
     if cur and len(lines) < 2:
         lines.append(" ".join(cur))
 
-    y_txt = y0 + 72
+    y_txt = y0 + 70
     for ln in lines[:2]:
         draw.text((x0 + 34, y_txt), ln, fill=txt_col, font=f_bdy)
-        y_txt += 52
+        y_txt += 50
 
     canvas.save(out_png, "PNG")
     return out_png
 
 
-def _render_subclip(src_mp4, dur, out_mp4, width, height, is_shorts, rng, overlay_png=None, gif_path=None):
+def _render_subclip(src_media, is_image, dur, out_mp4, width, height, is_shorts, rng, overlay_png=None, gif_path=None):
+    """Renders a subclip (video or Unsplash HD photo) with smooth Ken Burns motion + optional card & Giphy reaction."""
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
     fps = 24
     n_frames = max(12, int(round(dur * fps)))
@@ -157,28 +145,30 @@ def _render_subclip(src_mp4, dur, out_mp4, width, height, is_shorts, rng, overla
     scale_h += scale_h % 2
 
     zoom_start = 1.0
-    zoom_end = 1.07 if rng.random() > 0.35 else 1.03
+    zoom_end = 1.08 if is_image else (1.06 if rng.random() > 0.35 else 1.02)
 
-    if src_mp4 and os.path.exists(src_mp4):
+    inp_args = []
+    filter_chain = []
+
+    if src_media and os.path.exists(src_media):
+        if is_image:
+            inp_args.extend(["-loop", "1", "-t", f"{dur:.3f}", "-i", src_media])
+        else:
+            inp_args.extend(["-stream_loop", "-1", "-i", src_media])
         vf_parts = [
             f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=increase",
             f"crop={scale_w}:{scale_h}",
             f"zoompan=z='min({zoom_end}, {zoom_start}+({zoom_end}-{zoom_start})*on/{max(1,n_frames)})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n_frames}:s={width}x{height}:fps={fps}",
             "eq=contrast=1.06:brightness=-0.02:saturation=1.08",
         ]
-        inp_args = ["-stream_loop", "-1", "-i", src_mp4]
-    else:
-        vf_parts = ["color=c=0x0b0e14:s={width}x{height}:r={fps}:d={dur:.2f}".format(width=width, height=height, fps=fps, dur=dur), "eq=contrast=1.05"]
-        inp_args = []
-
-    filter_chain = []
-    cur_label = "[base]"
-    if inp_args:
         filter_chain.append(f"[0:v]{','.join(vf_parts)}[base]")
+        next_inp = 1
     else:
-        filter_chain.append(f"{vf_parts[0]}[base]")
+        filter_chain.append(f"color=c=0x0b0e14:s={width}x{height}:r={fps}:d={dur:.2f}[base]")
+        next_inp = 0
 
-    next_inp = 1
+    cur_label = "[base]"
+
     if overlay_png and os.path.exists(overlay_png):
         inp_args.extend(["-i", overlay_png])
         filter_chain.append(f"{cur_label}[{next_inp}:v]overlay=0:0:shortest=1[ov1]")
@@ -189,19 +179,10 @@ def _render_subclip(src_mp4, dur, out_mp4, width, height, is_shorts, rng, overla
         inp_args.extend(["-ignore_loop", "0", "-i", gif_path])
         gw = 240 if not is_shorts else 220
         gx = width - gw - 36
-        gy = 36 if not is_shorts else 130
-        filter_chain.append(f"[{next_inp}:v]scale={gw}:-1[gf]")
+        gy = 36 if not is_shorts else 140
+        filter_chain.append(f"[{next_inp}:v]scale={gw}:-1:flags=lanczos,format=rgba[gf]")
         filter_chain.append(f"{cur_label}[gf]overlay={gx}:{gy}:shortest=1[ov2]")
         cur_label = "[ov2]"
-        next_inp += 1
-
-    vig_name = "vignette_9x16.png" if is_shorts else "vignette_16x9.png"
-    vig_p = _asset_path("overlays", vig_name)
-    if vig_p:
-        inp_args.extend(["-i", vig_p])
-        filter_chain.append(f"[{next_inp}:v]scale={width}:{height}[vg]")
-        filter_chain.append(f"{cur_label}[vg]overlay=0:0:shortest=1[vout]")
-        cur_label = "[vout]"
         next_inp += 1
 
     final_map = cur_label.strip("[]")
@@ -239,17 +220,24 @@ def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_d
 
     music_file = _pick_music_bed(mode, is_shorts, rng)
     sfx_pool = _all_sfx_files()
-    sfx_whoosh = _pick_sfx_by_keywords(sfx_pool, ["whoosh", "swipe", "glitch"], rng)
-    sfx_market = _pick_sfx_by_keywords(sfx_pool, ["market_drop", "market_rally", "boom", "riser"], rng)
+
+    sfx_whoosh = fetch_freesound_sfx("whoosh transition", os.path.join(work_dir, "fs_whoosh.mp3"))
+    if not sfx_whoosh:
+        sfx_whoosh = _pick_sfx_by_keywords(sfx_pool, ["whoosh", "swipe", "glitch"], rng)
+
+    accent_q = "news alert chime" if mode == "news_bulletin" else "pop notification"
+    sfx_accent = fetch_freesound_sfx(accent_q, os.path.join(work_dir, "fs_accent.mp3"))
+    if not sfx_accent:
+        sfx_accent = _pick_sfx_by_keywords(sfx_pool, ["market", "pop", "boom", "riser"], rng)
 
     inputs = ["-i", v_master]
     idx = 1
-    parts = []
-    cur_v = "[0:a]"
+    parts = ["[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[vnorm]"]
+    cur_v = "[vnorm]"
 
     if music_file:
         inputs.extend(["-stream_loop", "-1", "-i", music_file])
-        parts.append(f"[{idx}:a]atrim=0:{total_dur:.2f},volume=0.075[mbase]")
+        parts.append(f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:{total_dur:.2f},volume=0.075[mbase]")
         parts.append(f"{cur_v}[mbase]sidechaincompress=threshold=0.04:ratio=4:attack=20:release=250:level_sc=0.8[vmix]")
         cur_v = "[vmix]"
         idx += 1
@@ -258,32 +246,28 @@ def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_d
         inputs.extend(["-i", sfx_whoosh])
         w_idx = idx
         idx += 1
-        parts.append(f"[{w_idx}:a]volume=0.22[w_raw]")
+        parts.append(f"[{w_idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.22[w_raw]")
         w_labels = []
-        t_cur = 3.5
+        t_cur = 4.5
         k = 0
-        while t_cur < total_dur - 1.5 and k < 75:
+        while t_cur < total_dur - 1.5 and k < 65:
             d_ms = int(t_cur * 1000)
             parts.append(f"[w_raw]adelay={d_ms}|{d_ms}[wd{k}]")
             w_labels.append(f"[wd{k}]")
-            t_cur += 8.0
+            t_cur += 9.0
             k += 1
         if w_labels:
             parts.append(f"{cur_v}{''.join(w_labels)}amix=inputs={1 + len(w_labels)}:normalize=0[am_w]")
             cur_v = "[am_w]"
 
-    if sfx_market and total_dur > 10.0:
-        inputs.extend(["-i", sfx_market])
+    if sfx_accent and total_dur > 10.0:
+        inputs.extend(["-i", sfx_accent])
         m_sfx_idx = idx
         idx += 1
-        d_ms = int(min(total_dur * 0.45, 180.0) * 1000)
-        parts.append(f"[{m_sfx_idx}:a]volume=0.32,adelay={d_ms}|{d_ms}[msfx]")
+        d_ms = int(min(total_dur * 0.42, 160.0) * 1000)
+        parts.append(f"[{m_sfx_idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.28,adelay={d_ms}|{d_ms}[msfx]")
         parts.append(f"{cur_v}[msfx]amix=inputs=2:normalize=0[am_final]")
         cur_v = "[am_final]"
-
-    if not parts:
-        subprocess.run(["ffmpeg", "-y", "-i", v_master, "-c:a", "copy", out_audio_wav], capture_output=True, check=True)
-        return out_audio_wav
 
     final_tag = cur_v.strip("[]")
     cmd = [
@@ -327,23 +311,32 @@ def _burn_subtitles(video_mp4, srt_path, out_mp4, is_shorts):
     return out_mp4
 
 
+def _gif_query_for_scene(narration, mode, bearish_flag, is_market):
+    low = narration.lower()
+    if bearish_flag:
+        return "stock market crash"
+    if is_market:
+        return "stonks chart up"
+    if any(w in low for w in ("ai", "artificial intelligence", "robot", "model", "gpu")):
+        return "artificial intelligence"
+    if any(w in low for w in ("game", "gaming", "gta", "playstation", "xbox", "steam")):
+        return "gaming controller"
+    if mode == "trending_viral":
+        return "mind blown reaction"
+    return "breaking news"
+
+
 def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
     os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
     is_shorts = VIDEO_FORMAT == "shorts"
     mode = os.getenv("CONTENT_MODE", "news_bulletin").strip().lower()
     width, height = (1080, 1920) if is_shorts else (1920, 1080)
+    orient = "portrait" if is_shorts else "landscape"
 
     rng = random.Random(2026)
     used_urls = set()
     subclips = []
     voice_files = []
-
-    badge_list = [
-        _asset_path("gifs_badges", "live_breaking_badge.gif"),
-        _asset_path("gifs_badges", "live_market_badge.gif"),
-        _asset_path("gifs_badges", "trending_fire_badge.gif"),
-    ]
-    badge_list = [b for b in badge_list if b]
 
     for sc in scene_audio_info:
         idx = sc["index"]
@@ -357,13 +350,21 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
         n_cuts = max(1, min(4, int(round(dur / cut_target))))
         cut_dur = dur / n_cuts
 
-        is_market_scene = any(k in (narration + " " + query).lower() for k in ("stock", "market", "candle", "nasdaq", "s&p", "rally", "crash", "drop", "nvda", "price", "earnings"))
-        bearish_flag = any(w in (narration + " " + query).lower() for w in ("drop", "crash", "fall", "bear", "plunge", "down", "loss"))
+        is_market_scene = any(
+            k in (narration + " " + query).lower()
+            for k in ("stock", "market", "candle", "nasdaq", "s&p", "rally", "crash", "drop", "nvda", "price", "earnings")
+        )
+        bearish_flag = any(
+            w in (narration + " " + query).lower()
+            for w in ("drop", "crash", "fall", "bear", "plunge", "down", "loss")
+        )
 
         for c_i in range(n_cuts):
             sub_mp4 = os.path.join(work_dir, f"sub_{idx:03d}_{c_i:02d}.mp4")
-            src_clip = None
+            src_media = None
+            is_img = False
 
+            # 1. Market candlestick clip on market scenes
             if is_market_scene and c_i == 0:
                 chart_mp4 = os.path.join(work_dir, f"chart_{idx:03d}.mp4")
                 try:
@@ -375,24 +376,62 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
                         symbol="NVDA" if "nvda" in narration.lower() else "SPY",
                         bearish_bias=bearish_flag,
                     )
-                    src_clip = chart_mp4
+                    src_media = chart_mp4
+                    is_img = False
                 except Exception:
-                    src_clip = None
+                    src_media = None
 
-            if not src_clip:
-                q_variant = query if c_i == 0 else f"{query} modern"
-                broll_dl = os.path.join(work_dir, f"raw_{idx:03d}_{c_i:02d}.mp4")
-                src_clip = fetch_broll_clip(q_variant, broll_dl, used_urls=used_urls, is_shorts=is_shorts)
+            # 2. Mix HD stock video B-roll and Unsplash HD editorial photos (with Ken Burns zoom)
+            if not src_media:
+                if c_i % 2 == 1:
+                    photo_dl = os.path.join(work_dir, f"photo_{idx:03d}_{c_i:02d}.jpg")
+                    src_media = fetch_stock_image(query, photo_dl, orientation=orient, used_urls=used_urls)
+                    is_img = True
+                else:
+                    q_variant = query if c_i == 0 else f"{query} modern"
+                    broll_dl = os.path.join(work_dir, f"raw_{idx:03d}_{c_i:02d}.mp4")
+                    src_media = fetch_broll_clip(q_variant, broll_dl, used_urls=used_urls, is_shorts=is_shorts)
+                    is_img = False
+                    if not src_media:
+                        photo_dl = os.path.join(work_dir, f"photo_fb_{idx:03d}_{c_i:02d}.jpg")
+                        src_media = fetch_stock_image(query, photo_dl, orientation=orient, used_urls=used_urls)
+                        is_img = True
 
+            # 3. Clean Stat / Insight card on key long-scene moments
             overlay_png = None
             if c_i == 1 and dur >= 6.0 and (idx % 3 == 0):
                 card_p = os.path.join(work_dir, f"card_{idx:03d}.png")
                 acc = "red" if bearish_flag else ("green" if is_market_scene else "gold")
-                _create_motion_card_png(card_p, width, height, query, narration, card_type="stat" if is_market_scene else "news", accent=acc)
+                _create_motion_card_png(
+                    card_p,
+                    width,
+                    height,
+                    query,
+                    narration,
+                    card_type="stat" if is_market_scene else "news",
+                    accent=acc,
+                )
                 overlay_png = card_p
 
-            gif_pick = badge_list[(idx + c_i) % len(badge_list)] if (badge_list and c_i == 0 and idx % 4 == 0) else None
-            _render_subclip(src_clip, cut_dur, sub_mp4, width, height, is_shorts, rng, overlay_png=overlay_png, gif_path=gif_pick)
+            # 4. Real Giphy reaction sticker/GIF on select hooks
+            gif_pick = None
+            if c_i == 0 and (idx % 4 == 1):
+                g_q = _gif_query_for_scene(narration, mode, bearish_flag, is_market_scene)
+                gif_dl = os.path.join(work_dir, f"giphy_{idx:03d}.gif")
+                gif_pick = fetch_giphy_sticker(g_q, gif_dl)
+
+            _render_subclip(
+                src_media,
+                is_img,
+                cut_dur,
+                sub_mp4,
+                width,
+                height,
+                is_shorts,
+                rng,
+                overlay_png=overlay_png,
+                gif_path=gif_pick,
+            )
             subclips.append(sub_mp4)
 
     concat_list_txt = os.path.join(work_dir, "visual_concat.txt")
