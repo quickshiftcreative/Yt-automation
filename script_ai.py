@@ -4,7 +4,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 import requests
-from config import GEMINI_API_KEY, CHANNEL_NAME, VIDEO_FORMAT
+from config import GEMINI_API_KEY, CHANNEL_NAME
 from learning_engine import load_strategy_memory
 
 PRIORITY_MODELS = [
@@ -165,7 +165,7 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
     if content_mode not in ("news_bulletin", "trending_viral", "deep_dive_evergreen"):
         content_mode = "news_bulletin"
 
-    is_shorts = VIDEO_FORMAT == "shorts"
+    is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
     scene_count = "5" if is_shorts else "36"
     words_per_scene = "22-28" if is_shorts else "38-45"
     duration_hint = (
