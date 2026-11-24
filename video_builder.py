@@ -7,6 +7,7 @@ from chart_animator import render_animated_candlestick_clip
 from media_fetcher import (
     fetch_article_image,
     fetch_broll_clip,
+    fetch_freesound_music,
     fetch_freesound_sfx,
     fetch_giphy_sticker,
     fetch_stock_image,
@@ -53,8 +54,7 @@ def _pick_sfx_by_keywords(all_files, keywords, rng):
     return rng.choice(all_files)
 
 
-def _pick_ai_music_bed(music_direction, mode, is_shorts, rng):
-    """Selects the exact best track from assets/music/ using AI direction + mood keywords."""
+def _pick_local_music_fallback(music_direction, mode, is_shorts, rng):
     root = _repo_root()
     files = []
     for m_dir in (os.path.join(root, "assets", "music"), os.path.join(root, "assets", "music_beds")):
@@ -69,46 +69,27 @@ def _pick_ai_music_bed(music_direction, mode, is_shorts, rng):
     wanted_file = str(md.get("track_file", "")).strip().lower()
     mood = str(md.get("mood", "news")).strip().lower()
 
-    # 1. Exact track picked by Gemini from assets/music/
     if wanted_file and wanted_file != "auto":
         for f in files:
             if os.path.basename(f).lower() == wanted_file:
                 return f
 
-    # 2. Match by AI mood keywords in filename
     mood_keywords = {
-        "tense": ["tense", "dark", "scandal", "suspense", "drama", "risk", "thrill"],
-        "news": ["news", "bulletin", "market", "breaking", "pulse", "report"],
-        "energetic": ["energetic", "viral", "gaming", "phonk", "shorts", "hype", "fast", "upbeat"],
-        "deep_dive": ["deep", "lofi", "ambient", "tech", "ai", "doc", "explain"],
-        "business": ["business", "corporate", "finance", "luxury", "money", "market"],
+        "tense": ["tense", "dark", "scandal", "suspense", "drama", "risk"],
+        "news": ["news", "bulletin", "market", "breaking", "pulse"],
+        "energetic": ["energetic", "viral", "gaming", "phonk", "shorts", "hype"],
+        "deep_dive": ["deep", "lofi", "ambient", "tech", "ai", "doc"],
+        "business": ["business", "corporate", "finance", "luxury", "money"],
         "calm": ["calm", "chill", "lofi", "soft", "ambient"],
     }
     for kw in mood_keywords.get(mood, []):
         for f in files:
             if kw in os.path.basename(f).lower():
                 return f
-
-    # 3. Fallback by format/mode
-    if is_shorts:
-        for f in files:
-            if any(k in os.path.basename(f).lower() for k in ("shorts", "viral", "phonk", "energetic", "gaming")):
-                return f
-
-    pref_map = {
-        "news_bulletin": ["news", "market", "breaking", "business"],
-        "trending_viral": ["viral", "gaming", "energetic", "hook"],
-        "deep_dive_evergreen": ["deep", "lofi", "tech", "ai", "business"],
-    }
-    for key in pref_map.get(mode, []):
-        for f in files:
-            if key in os.path.basename(f).lower():
-                return f
     return rng.choice(files)
 
 
 def _compute_safe_music_volume(music_direction, is_shorts):
-    """Translates AI mood/intensity into a safe linear gain applied AFTER -24 LUFS normalization."""
     md = music_direction or {}
     intensity = str(md.get("intensity", "balanced")).strip().lower()
     base_map = {
@@ -127,7 +108,6 @@ def _compute_safe_music_volume(music_direction, is_shorts):
 
     if is_shorts:
         vol += 0.012
-    # Strict safety guardrail: music stays rich & audible, NEVER overpowers voice
     return round(max(0.058, min(0.120, vol)), 3)
 
 
@@ -145,7 +125,6 @@ def _find_font(size):
 
 
 def _create_newsroom_highlight_card(out_png, width, height, badge_text, headline_text, thumb_img_path=None, accent="gold"):
-    """Draws an editorial Newsroom Highlight Card with optional real article photo + yellow highlighter bar."""
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
@@ -164,7 +143,6 @@ def _create_newsroom_highlight_card(out_png, width, height, badge_text, headline
     x1 = x0 + box_w
     y1 = y0 + box_h
 
-    # Frosted dark editorial card with clean top accent strip
     draw.rounded_rectangle([x0, y0, x1, y1], radius=24, fill=bg_col, outline=(255, 255, 255, 45), width=2)
     draw.rounded_rectangle([x0, y0, x1, y0 + 10], radius=6, fill=acc_col)
 
@@ -195,12 +173,10 @@ def _create_newsroom_highlight_card(out_png, width, height, badge_text, headline
     f_badge = _find_font(22)
     f_head = _find_font(40 if not is_vertical else 38)
 
-    # Top pill badge
     pill_lbl = (badge_text or "NEWSROOM BRIEF").upper()[:24]
     draw.rounded_rectangle([txt_left, y0 + 28, txt_left + 260, y0 + 64], radius=10, fill=acc_col)
     draw.text((txt_left + 14, y0 + 34), pill_lbl, fill=(10, 12, 16, 255), font=f_badge)
 
-    # Wrap headline into 2 crisp lines; highlight line 2 with editorial yellow highlighter sweep
     words = (headline_text or "Market Update").split()
     max_chars = 26 if not is_vertical else 24
     lines, cur = [], []
@@ -267,7 +243,6 @@ def _render_subclip(
     gif_path=None,
     is_chart=False,
 ):
-    """Consistent dark-cinematic look + subtle vignette; Ken Burns ONLY on photos, smooth motion on MP4/charts."""
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
     fps = 24
     n_frames = max(12, int(round(dur * fps)))
@@ -355,7 +330,6 @@ def _render_subclip(
 
 
 def _append_sfx_layer(inputs, parts, cur_v, idx, sfx_path, hit_times_ms, max_dur, vol, tag_prefix):
-    """Safely mixes an event-synced SFX track using proper asplit (zero voice echo)."""
     if not sfx_path or not os.path.exists(sfx_path) or not hit_times_ms:
         return cur_v, idx
 
@@ -400,7 +374,6 @@ def _master_voice_and_music(
     music_direction=None,
     sfx_events=None,
 ):
-    """Broadcast voice mastering + AI-directed normalized music ducking + exact cut-synced SFX."""
     rng = random.Random(404)
 
     v_filt = (
@@ -413,16 +386,22 @@ def _master_voice_and_music(
     v_master = os.path.join(work_dir, "voice_mastered.wav")
     _run_ffmpeg(["ffmpeg", "-y", "-i", voice_concat_mp3, "-af", v_filt, "-ar", "44100", "-ac", "2", v_master])
 
-    music_file = _pick_ai_music_bed(music_direction, mode, is_shorts, rng)
-    music_vol = _compute_safe_music_volume(music_direction, is_shorts)
+    md = music_direction or {}
+    # 1. Fetch AI-matched CC0 background music directly via Freesound API
+    music_file = fetch_freesound_music(
+        md.get("music_query", "ambient technology electronic loop"),
+        os.path.join(work_dir, "fs_bgm.mp3"),
+    )
+    # 2. Fallback to local assets/music/ folder if available
+    if not music_file:
+        music_file = _pick_local_music_fallback(md, mode, is_shorts, rng)
+
+    music_vol = _compute_safe_music_volume(md, is_shorts)
     if music_file:
-        md = music_direction or {}
         print(
-            f"[MusicAI] Track: {os.path.basename(music_file)} | Mood: {md.get('mood', 'auto')} | "
-            f"Intensity: {md.get('intensity', 'balanced')} | SafeVol: {music_vol} | {md.get('reason', '')}"
+            f"[MusicAI] Active BGM: {os.path.basename(music_file)} | Mood: {md.get('mood', 'auto')} | "
+            f"Intensity: {md.get('intensity', 'balanced')} | SafeVol: {music_vol}"
         )
-    else:
-        print("[MusicAI] No MP3/WAV found in assets/music/ — rendering crisp voice + studio SFX only.")
 
     sfx_pool = _all_sfx_files()
     sfx_whoosh = fetch_freesound_sfx("soft whoosh transition", os.path.join(work_dir, "fs_whoosh.mp3"))
@@ -442,8 +421,6 @@ def _master_voice_and_music(
     parts = ["[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[vnorm]"]
     cur_v = "[vnorm]"
 
-    # Normalize custom music track first (-24 LUFS) so raw track loudness never breaks balance,
-    # then apply AI-chosen safe volume + smooth sidechain ducking under the voiceover.
     if music_file and os.path.exists(music_file):
         m_norm = os.path.join(work_dir, "music_norm.wav")
         _run_ffmpeg([
@@ -466,7 +443,6 @@ def _master_voice_and_music(
         cur_v = "[vmix]"
         idx += 1
 
-    # Exact event-synced SFX timestamps (recorded during visual assembly)
     events = sfx_events or {}
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_whoosh, events.get("whoosh", []), 0.9, 0.14, "wh")
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_pop, events.get("pop", []), 0.6, 0.18, "pp")
@@ -555,7 +531,6 @@ def build_final_video(
     voice_files = []
     sfx_events = {"whoosh": [], "pop": [], "impact": []}
 
-    # Fetch 1 real press article image up front for authentic Newsroom Highlight Cards
     article_thumb = None
     if chosen_topic:
         art_dl = os.path.join(work_dir, "article_hero.jpg")
@@ -572,7 +547,6 @@ def build_final_video(
         highlight_text = sc.get("highlight_text", "") or narration
         voice_files.append(v_path)
 
-        # Fast opening hook pacing in Scene 1 (1.8s rapid cuts for zero-drop retention)
         if idx == 0:
             n_cuts = max(2, min(5, int(round(dur / 1.8))))
         else:
@@ -580,7 +554,6 @@ def build_final_video(
             n_cuts = max(1, min(4, int(round(dur / cut_target))))
         cut_dur = dur / n_cuts
 
-        # Sync soft whoosh on major scene transitions
         if idx > 0 and (idx % 2 == 1 or is_shorts):
             sfx_events["whoosh"].append(int(timeline_t * 1000))
 
@@ -600,7 +573,6 @@ def build_final_video(
             is_img = False
             is_chart = False
 
-            # 1. Animated live candlestick chart on key market beats
             if is_market_scene and c_i == 0 and (idx % 3 == 0):
                 chart_mp4 = os.path.join(work_dir, f"chart_{idx:03d}.mp4")
                 try:
@@ -619,7 +591,6 @@ def build_final_video(
                 except Exception:
                     src_media = None
 
-            # 2. Mix HD stock B-roll videos & editorial Unsplash HD photos
             if not src_media:
                 if c_i % 2 == 1:
                     photo_dl = os.path.join(work_dir, f"photo_{idx:03d}_{c_i:02d}.jpg")
@@ -635,7 +606,6 @@ def build_final_video(
                         src_media = fetch_stock_image(query, photo_dl, orientation=orient, used_urls=used_urls)
                         is_img = True
 
-            # 3. Editorial Newsroom Highlight Card on Scene 1 hook & key story beats
             overlay_png = None
             show_card = (idx == 0 and c_i == 0) or (c_i == 1 and dur >= 5.5 and (idx % 3 == 0))
             if show_card:
@@ -655,7 +625,6 @@ def build_final_video(
                 overlay_png = card_p
                 sfx_events["pop"].append(int(timeline_t * 1000))
 
-            # 4. Subtle Giphy reaction sticker on select beats (never overlapping cards)
             gif_pick = None
             if not overlay_png and c_i == 0 and idx > 0 and (idx % 5 == 2):
                 g_q = _gif_query_for_scene(narration, mode, bearish_flag, is_market_scene)
