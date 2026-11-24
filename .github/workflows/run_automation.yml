@@ -2,12 +2,12 @@ name: My automation YT - Quick Shift Creative (2 Long + 4 Shorts Pro)
 
 on:
   schedule:
-    - cron: '15 13 * * *'  # Slot 1: 8:15 AM EST  (6:45 PM IST)  | SHORT  - News Bulletin (Gaming/Tech/AI/Market)
-    - cron: '15 16 * * *'  # Slot 2: 11:15 AM EST (9:45 PM IST)  | SHORT  - Trending Viral Topic
-    - cron: '15 19 * * *'  # Slot 3: 2:15 PM EST  (12:45 AM IST) | LONG   - News Bulletin (8-10 min)
-    - cron: '15 22 * * *'  # Slot 4: 5:15 PM EST  (3:45 AM IST)  | SHORT  - Trending Viral Topic
-    - cron: '15 1 * * *'   # Slot 5: 8:15 PM EST  (6:45 AM IST)  | LONG   - High-RPM / Reach / Subscriber Growth
-    - cron: '15 4 * * *'   # Slot 6: 11:15 PM EST (9:45 AM IST)  | SHORT  - High-RPM / Reach / Subscriber Short
+    - cron: '40 12 * * *'  # Renders 35m early -> Publishes 8:15 AM EST  (6:45 PM IST)  | SHORT - News Bulletin
+    - cron: '40 15 * * *'  # Renders 35m early -> Publishes 11:15 AM EST (9:45 PM IST)  | SHORT - Trending Viral
+    - cron: '40 18 * * *'  # Renders 35m early -> Publishes 2:15 PM EST  (12:45 AM IST) | LONG  - News Bulletin
+    - cron: '40 21 * * *'  # Renders 35m early -> Publishes 5:15 PM EST  (3:45 AM IST)  | SHORT - Trending Viral
+    - cron: '40 0 * * *'   # Renders 35m early -> Publishes 8:15 PM EST  (6:45 AM IST)  | LONG  - High-RPM / Growth
+    - cron: '40 3 * * *'   # Renders 35m early -> Publishes 11:15 PM EST (9:45 AM IST)  | SHORT - High-RPM / Growth
   workflow_dispatch:
     inputs:
       content_mode:
@@ -90,7 +90,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Configure Daily US Slot (2 Long + 4 Shorts)
+      - name: Configure Daily US Slot (2 Long + 4 Shorts + 35m Pre-Schedule)
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
@@ -103,32 +103,32 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "schedule" ]; then
             case "$EVENT_SCHEDULE" in
-              "15 13 * * *")
+              "40 12 * * *")
                 echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
                 echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
-              "15 16 * * *")
+              "40 15 * * *")
                 echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
                 echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
-              "15 19 * * *")
+              "40 18 * * *")
                 echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
                 echo "CONTENT_MODE=news_bulletin" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
-              "15 22 * * *")
+              "40 21 * * *")
                 echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
                 echo "CONTENT_MODE=trending_viral" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
-              "15 1 * * *")
+              "40 0 * * *")
                 echo "VIDEO_FORMAT=horizontal" >> $GITHUB_ENV
                 echo "CONTENT_MODE=deep_dive_evergreen" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
                 ;;
-              "15 4 * * *")
+              "40 3 * * *")
                 echo "VIDEO_FORMAT=shorts" >> $GITHUB_ENV
                 echo "CONTENT_MODE=deep_dive_evergreen" >> $GITHUB_ENV
                 echo "NEWS_CATEGORY=auto" >> $GITHUB_ENV
@@ -141,6 +141,7 @@ jobs:
             esac
             echo "VOICE_STYLE=auto" >> $GITHUB_ENV
             echo "PRIVACY_STATUS=public" >> $GITHUB_ENV
+            echo "SCHEDULE_LEAD_MINUTES=35" >> $GITHUB_ENV
             echo "CUSTOM_TOPIC=" >> $GITHUB_ENV
           else
             echo "VIDEO_FORMAT=${IN_FORMAT:-auto}" >> $GITHUB_ENV
@@ -148,6 +149,7 @@ jobs:
             echo "NEWS_CATEGORY=${IN_CATEGORY:-auto}" >> $GITHUB_ENV
             echo "VOICE_STYLE=${IN_VOICE:-auto}" >> $GITHUB_ENV
             echo "PRIVACY_STATUS=${IN_PRIVACY:-unlisted}" >> $GITHUB_ENV
+            echo "SCHEDULE_LEAD_MINUTES=0" >> $GITHUB_ENV
             echo "CUSTOM_TOPIC=${IN_TOPIC}" >> $GITHUB_ENV
           fi
 
@@ -161,7 +163,7 @@ jobs:
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
         run: |
-          echo "Active Slot -> Format: $VIDEO_FORMAT | Mode: $CONTENT_MODE | Category: $NEWS_CATEGORY | Privacy: $PRIVACY_STATUS"
+          echo "Active Slot -> Format: $VIDEO_FORMAT | Mode: $CONTENT_MODE | Privacy: $PRIVACY_STATUS | Lead: ${SCHEDULE_LEAD_MINUTES}m"
           python main.py
 
       - name: Save video history & self-learning memory
