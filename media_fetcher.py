@@ -1,4 +1,4 @@
-fimport os
+import os
 import random
 import re
 import urllib.parse
