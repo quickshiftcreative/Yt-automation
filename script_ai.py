@@ -195,17 +195,11 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
     )
 
     local_tracks = _list_local_music_tracks()
-    if local_tracks:
-        music_inventory_block = (
-            "AVAILABLE BACKGROUND MUSIC TRACKS in assets/music/:\n"
-            + "\n".join(f"- {t}" for t in local_tracks)
-            + "\nPick the SINGLE best filename from the list above for `music_direction.track_file`."
-        )
-    else:
-        music_inventory_block = (
-            "No custom files detected in assets/music/ yet. Set `music_direction.track_file` to \"auto\" "
-            "and specify the ideal mood & intensity so the audio engine matches future tracks automatically."
-        )
+    local_hint = (
+        f"Optional local tracks in assets/music/: {', '.join(local_tracks)}."
+        if local_tracks
+        else "The pipeline fetches CC0 background music automatically via Freesound API."
+    )
 
     extra_headlines = [] if custom_topic else _fetch_extra_mode_headlines(content_mode)
     combined_topics = []
@@ -235,7 +229,7 @@ Scene Structure Guide:
 
 {topic_block}
 
-{music_inventory_block}
+{local_hint}
 
 Human-Like Spoken Script Rules (CRITICAL):
 - Write like a real YouTube host talking to a smart friend — NEVER like a formal article or AI essay.
@@ -244,13 +238,14 @@ Human-Like Spoken Script Rules (CRITICAL):
 - NEVER use AI clichés: "delve", "game-changer", "landscape", "buckle up", "revolutionary", "let's dive in", "in conclusion", "ever-evolving", "tapestry", "testament", "welcome back".
 - NO emojis, NO markdown, NO stage directions in narration.
 - For each scene, set `"tone"` to one of: `"hook"`, `"urgent"`, `"excited"`, `"serious"`, `"analytical"`, `"calm"`.
-- For each scene, set `"highlight_text"` to a short 4-8 word punchy stat or headline phrase for an editorial Newsroom Highlight Card (e.g., "Nvidia supply shock rattles Wall Street").
+- For each scene, set `"highlight_text"` to a short 4-8 word punchy stat or headline phrase for an editorial Newsroom Highlight Card.
 - For each scene, set `"visual_query"` to 2-4 concrete English keywords for HD B-roll/photos.
 
 AI Background Music Direction Rules (CRITICAL):
+- Generate `"music_query"`: 3-4 English keywords to search a CC0 instrumental background track on Freesound API matching the exact emotion of this story (e.g., "dark suspense ambient synth", "corporate technology electronic loop", "upbeat energetic gaming beat", "chill lofi documentary beat").
 - Choose `"mood"` from: `"news"`, `"tense"`, `"energetic"`, `"deep_dive"`, `"business"`, `"calm"`.
-- Choose `"intensity"` from: `"subtle"` (serious/analytical/scandal — very gentle bed), `"balanced"` (standard news/deep dive), `"energetic"` (fast viral Shorts/gaming).
-- Choose `"volume_scale"` strictly between `0.06` and `0.11` based on the situation so background music enhances emotion without EVER overpowering the human voice.
+- Choose `"intensity"` from: `"subtle"` (serious/analytical/scandal), `"balanced"` (standard news/deep dive), `"energetic"` (fast viral Shorts/gaming).
+- Choose `"volume_scale"` strictly between `0.06` and `0.11` so background music supports the emotion without EVER overpowering the voice.
 
 Return ONLY valid JSON:
 {{
@@ -264,11 +259,12 @@ Return ONLY valid JSON:
   "thumbnail_subtext": "string",
   "thumbnail_query": "string",
   "music_direction": {{
-    "track_file": "string",
+    "music_query": "ambient technology electronic loop",
+    "track_file": "auto",
     "mood": "news",
     "intensity": "balanced",
     "volume_scale": 0.08,
-    "reason": "short explanation of why this music level fits the story"
+    "reason": "short explanation of why this music style and volume fit the video"
   }},
   "scenes": [
     {{
@@ -326,6 +322,7 @@ Return ONLY valid JSON:
                 except Exception:
                     v_scale = 0.08
                 blueprint["music_direction"] = {
+                    "music_query": str(md.get("music_query", "ambient electronic background loop")).strip(),
                     "track_file": str(md.get("track_file", "auto")).strip(),
                     "mood": str(md.get("mood", "news")).strip().lower(),
                     "intensity": str(md.get("intensity", "balanced")).strip().lower(),
@@ -353,7 +350,7 @@ Return ONLY valid JSON:
                     raise ValueError("Empty scenes")
                 print(
                     f"[ScriptAI] Blueprint generated with {model} ({len(blueprint['scenes'])} scenes) | "
-                    f"MusicAI -> {blueprint['music_direction']['mood']} ({blueprint['music_direction']['intensity']})"
+                    f"MusicAI -> '{blueprint['music_direction']['music_query']}' ({blueprint['music_direction']['intensity']})"
                 )
                 return blueprint
             except Exception as e:
