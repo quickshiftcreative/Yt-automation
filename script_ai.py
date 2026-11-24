@@ -1,16 +1,18 @@
 import json
 import os
 import re
+import time
 import xml.etree.ElementTree as ET
 import requests
-from config import GEMINI_API_KEY, CHANNEL_NAME, VIDEO_FORMAT, NEWS_CATEGORY
+from config import GEMINI_API_KEY, CHANNEL_NAME, VIDEO_FORMAT
 from learning_engine import load_strategy_memory
 
-FALLBACK_MODELS = [
-    "gemini-3.0-flash",
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
+PRIORITY_MODELS = [
     "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3.0-flash",
 ]
 
 MODE_RSS_FEEDS = {
@@ -53,48 +55,25 @@ def _fetch_extra_mode_headlines(mode):
 
 
 def _discover_gemini_models():
+    ordered = list(PRIORITY_MODELS)
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
-        resp = requests.get(url, timeout=20)
-        if resp.status_code != 200:
-            return FALLBACK_MODELS
-        models = resp.json().get("models", [])
-        candidates = []
-        skip_keywords = (
-            "embedding", "aqa", "image", "veo", "tts", "audio",
-            "robotics", "computer-use", "live", "vision", "learnlm",
-        )
-        for m in models:
-            name = m.get("name", "").replace("models/", "").strip()
-            methods = m.get("supportedGenerationMethods", [])
-            lname = name.lower()
-            if "generateContent" not in methods or not lname.startswith("gemini"):
-                continue
-            if any(k in lname for k in skip_keywords):
-                continue
-            candidates.append(name)
-
-        def _score(model_name):
-            ln = model_name.lower()
-            score = 0
-            if "flash" in ln:
-                score += 100
-            if "lite" in ln:
-                score -= 10
-            if "preview" in ln or "exp" in ln:
-                score -= 5
-            if "latest" in ln:
-                score += 5
-            return score
-
-        candidates.sort(key=_score, reverse=True)
-        ordered = []
-        for m in candidates + FALLBACK_MODELS:
-            if m not in ordered:
-                ordered.append(m)
-        return ordered[:8]
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            skip_keywords = (
+                "embedding", "aqa", "image", "veo", "tts", "audio",
+                "robotics", "computer-use", "live", "vision", "learnlm",
+            )
+            for m in resp.json().get("models", []):
+                name = m.get("name", "").replace("models/", "").strip()
+                methods = m.get("supportedGenerationMethods", [])
+                lname = name.lower()
+                if "generateContent" in methods and "flash" in lname and not any(k in lname for k in skip_keywords):
+                    if name not in ordered:
+                        ordered.append(name)
     except Exception:
-        return FALLBACK_MODELS
+        pass
+    return ordered[:8]
 
 
 def _extract_json(text):
@@ -116,7 +95,6 @@ def _clean_narration(text):
 
 def _build_mode_instructions(mode, is_shorts):
     if mode == "trending_viral":
-        badge_examples = '"VIRAL TREND", "TRENDING NOW", "HOT TOPIC"'
         role_desc = (
             "Viral Trend & Culture Producer — capturing whatever is genuinely trending right now "
             "(games, pop culture, viral moments, or major US talking points) with sharp, human commentary."
@@ -135,10 +113,9 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 19-26 (Why It Hit So Hard): Psychological, cultural, or market reasons behind the hype.
    - Scenes 27-33 (Where It Goes Next): Will it fade in a week or reshape the space?
    - Scenes 34-36 (Closing Take): Honest wrap-up, comment question, and Quick Shift Creative subscribe cue."""
-        return role_desc, badge_examples, structure
+        return role_desc, structure
 
     if mode == "deep_dive_evergreen":
-        badge_examples = '"HIGH RPM BRIEF", "DEEP DIVE", "MONEY & TECH"'
         role_desc = (
             "High-RPM Evergreen & Subscriber Growth Strategist — crafting high-retention stories "
             "with strong reach and subscriber appeal across finance, AI/tech strategy, business models, and high-interest topics."
@@ -157,9 +134,8 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 19-26 (Hidden Bottlenecks & Competition): What most people overlook and how rivals respond.
    - Scenes 27-33 (Future Outlook): Realistic scenarios and what to watch next.
    - Scenes 34-36 (Final Takeaway): Crisp summary, comment prompt, and Quick Shift Creative subscribe cue."""
-        return role_desc, badge_examples, structure
+        return role_desc, structure
 
-    badge_examples = '"DAILY BULLETIN", "MARKETS & TECH", "GAMING & AI"'
     role_desc = (
         "Broadcast News & Markets Anchor — covering Gaming, Tech, AI, and Business/Market news "
         "in a natural, conversational human voice."
@@ -178,7 +154,7 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 20-27 (Market & Business Segment): Stock/index moves (red/green candle shifts), earnings, and business strategy.
    - Scenes 28-33 (Cross-Sector Connections): How tech, AI, gaming, and capital markets intersect right now.
    - Scenes 34-36 (Sign-Off): Concise wrap-up, audience question, and Quick Shift Creative subscribe cue."""
-    return role_desc, badge_examples, structure
+    return role_desc, structure
 
 
 def generate_video_blueprint(trending_topics, custom_topic=""):
@@ -216,9 +192,8 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
         topics_list = "\n".join(f"- {t}" for t in combined_topics[:28])
         topic_block = f"LIVE HEADLINES & TRENDS:\n{topics_list}"
 
-    role_desc, badge_examples, structure_guide = _build_mode_instructions(content_mode, is_shorts)
+    role_desc, structure_guide = _build_mode_instructions(content_mode, is_shorts)
     format_label = "YouTube Shorts (9:16 vertical)" if is_shorts else "Long-Form Horizontal YouTube Video (16:9, 8-10 minutes)"
-    shorts_hash = " and #Shorts" if is_shorts else ""
 
     prompt = f"""You are the {role_desc} for "{CHANNEL_NAME}".
 {mem_hint}
@@ -226,7 +201,10 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
 Active Mode: {content_mode.upper()}
 Format: {format_label}
 Target Length: {duration_hint}
-Number of Scenes: EXACTLY {scene_count} scenes. Output ALL {scene_count} scenes!
+Number of Scenes: EXACTLY {scene_count} scenes ({words_per_scene} words per scene). Output ALL {scene_count} scenes!
+
+Scene Structure Guide:
+{structure_guide}
 
 {topic_block}
 
@@ -235,6 +213,7 @@ Human-Like Writing Rules (CRITICAL):
 - NEVER use AI clichés such as: "delve", "game-changer", "landscape", "buckle up", "revolutionary", "let's dive in", "in conclusion", "ever-evolving", "tapestry", "testament".
 - Vary sentence lengths naturally (mix short punchy sentences with clear explanatory sentences).
 - NO emojis, NO markdown, NO stage directions in narration.
+- Each scene's "visual_query" must be 2-4 concrete English keywords for stock B-roll/photos (e.g., "nvidia gpu server", "wall street trading screen", "gaming controller neon").
 
 Return ONLY valid JSON:
 {{
@@ -270,32 +249,41 @@ Return ONLY valid JSON:
 
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-        try:
-            resp = requests.post(url, json=payload, timeout=120)
-            if resp.status_code != 200:
-                last_error = f"{model} HTTP {resp.status_code}: {resp.text[:250]}"
-                continue
-            raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            blueprint = _extract_json(raw_text)
-            if not blueprint.get("title") or not blueprint.get("scenes"):
-                raise ValueError("Missing title or scenes")
+        for attempt in range(3):
+            try:
+                resp = requests.post(url, json=payload, timeout=120)
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    last_error = f"{model} HTTP {resp.status_code} (attempt {attempt + 1})"
+                    print(f"[ScriptAI] {last_error}, retrying in {4 * (attempt + 1)}s...")
+                    time.sleep(4 * (attempt + 1))
+                    continue
+                if resp.status_code != 200:
+                    last_error = f"{model} HTTP {resp.status_code}: {resp.text[:220]}"
+                    break
 
-            cat = str(blueprint.get("category", "tech")).strip().lower()
-            blueprint["category"] = cat if cat in ("ai", "tech", "gaming") else "tech"
-            blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "DAILY BULLETIN")).upper().strip()[:18]
-            blueprint["title"] = blueprint["title"].strip()[:98]
-            if is_shorts and "#shorts" not in blueprint["title"].lower() and len(blueprint["title"]) <= 90:
-                blueprint["title"] += " #Shorts"
+                raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                blueprint = _extract_json(raw_text)
+                if not blueprint.get("title") or not blueprint.get("scenes"):
+                    raise ValueError("Missing title or scenes")
 
-            for sc in blueprint["scenes"]:
-                sc["narration"] = _clean_narration(sc.get("narration", ""))
-                sc["visual_query"] = sc.get("visual_query", "technology").strip()
+                cat = str(blueprint.get("category", "tech")).strip().lower()
+                blueprint["category"] = cat if cat in ("ai", "tech", "gaming") else "tech"
+                blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "DAILY BULLETIN")).upper().strip()[:18]
+                blueprint["title"] = blueprint["title"].strip()[:98]
+                if is_shorts and "#shorts" not in blueprint["title"].lower() and len(blueprint["title"]) <= 90:
+                    blueprint["title"] += " #Shorts"
 
-            blueprint["scenes"] = [s for s in blueprint["scenes"] if s["narration"]]
-            if not blueprint["scenes"]:
-                raise ValueError("Empty scenes")
-            return blueprint
-        except Exception as e:
-            last_error = f"{model} error: {e}"
+                for sc in blueprint["scenes"]:
+                    sc["narration"] = _clean_narration(sc.get("narration", ""))
+                    sc["visual_query"] = sc.get("visual_query", "technology").strip()
+
+                blueprint["scenes"] = [s for s in blueprint["scenes"] if s["narration"]]
+                if not blueprint["scenes"]:
+                    raise ValueError("Empty scenes")
+                print(f"[ScriptAI] Blueprint generated with {model} ({len(blueprint['scenes'])} scenes)")
+                return blueprint
+            except Exception as e:
+                last_error = f"{model} error: {e}"
+                break
 
     raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
