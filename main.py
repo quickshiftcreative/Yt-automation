@@ -47,9 +47,9 @@ def run_pipeline():
     trending_topics = [] if CUSTOM_TOPIC else fetch_trending_topics()
     blueprint = generate_video_blueprint(trending_topics, custom_topic=CUSTOM_TOPIC)
 
-    srt_path = os.path.join(WORK_DIR, "captions.srt")
+    captions_ass_path = os.path.join(WORK_DIR, "captions.ass")
     scene_audio_info, total_duration = generate_scene_voices_and_srt(
-        blueprint["scenes"], WORK_DIR, srt_path
+        blueprint["scenes"], WORK_DIR, captions_ass_path
     )
     print(f"[Pipeline] Total voiceover duration: {total_duration:.2f}s")
 
@@ -65,7 +65,14 @@ def run_pipeline():
     )
 
     final_video_path = os.path.join(OUTPUT_DIR, "final_video.mp4")
-    build_final_video(scene_audio_info, srt_path, WORK_DIR, final_video_path)
+    build_final_video(
+        scene_audio_info,
+        captions_ass_path,
+        WORK_DIR,
+        final_video_path,
+        music_direction=blueprint.get("music_direction", {}),
+        chosen_topic=blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"]),
+    )
 
     video_id = upload_video_with_thumbnail(
         video_path=final_video_path,
