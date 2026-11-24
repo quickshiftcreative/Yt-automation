@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import re
@@ -31,6 +32,19 @@ MODE_RSS_FEEDS = {
         "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
     ],
 }
+
+
+def _list_local_music_tracks():
+    root = os.path.dirname(os.path.abspath(__file__))
+    tracks = []
+    for folder in (os.path.join(root, "assets", "music"), os.path.join(root, "assets", "music_beds")):
+        if os.path.isdir(folder):
+            for ext in ("*.mp3", "*.wav", "*.m4a"):
+                for p in sorted(glob.glob(os.path.join(folder, ext))):
+                    name = os.path.basename(p)
+                    if name not in tracks:
+                        tracks.append(name)
+    return tracks
 
 
 def _fetch_extra_mode_headlines(mode):
@@ -96,20 +110,20 @@ def _clean_narration(text):
 def _build_mode_instructions(mode, is_shorts):
     if mode == "trending_viral":
         role_desc = (
-            "Viral Trend & Culture Producer — capturing whatever is genuinely trending right now "
+            "Viral Trend & Culture Producer — capturing whatever is genuinely blowing up right now "
             "(games, pop culture, viral moments, or major US talking points) with sharp, human commentary."
         )
         if is_shorts:
             structure = """
-   - Scene 1: Immediate 3-second hook naming what is blowing up right now and why it matters.
-   - Scenes 2-4: Key details, public/creator reaction, and the real twist.
-   - Scene 5: Sharp punchline + viewer question + Quick Shift Creative CTA."""
+   - Scene 1 (tone: hook): Immediate 3-second conflict hook naming what is blowing up and why it matters.
+   - Scenes 2-4 (tones: excited / urgent / serious): Key details, real crowd reaction, and the unexpected twist.
+   - Scene 5 (tone: punchy): Sharp verdict + viewer question + Quick Shift Creative CTA."""
         else:
             structure = """
-   Structure the 36 scenes around the #1 non-news viral/trending topic exploding right now:
-   - Scenes 1-3 (Cold Hook): Open right on the viral wave and why people cannot stop talking about it.
-   - Scenes 4-10 (What Sparked It): How the trend or game/creator moment took off so fast.
-   - Scenes 11-18 (Internet & Crowd Reaction): Real perspectives, debates, and funny/intense moments around it.
+   Structure the 36 scenes around the #1 viral/trending topic exploding right now:
+   - Scenes 1-3 (Cold Hook): Drop straight into the tension — zero "welcome back" intros.
+   - Scenes 4-10 (What Sparked It): How the trend, game, or creator moment took off so fast.
+   - Scenes 11-18 (Internet & Crowd Reaction): Real perspectives, debates, and standout moments.
    - Scenes 19-26 (Why It Hit So Hard): Psychological, cultural, or market reasons behind the hype.
    - Scenes 27-33 (Where It Goes Next): Will it fade in a week or reshape the space?
    - Scenes 34-36 (Closing Take): Honest wrap-up, comment question, and Quick Shift Creative subscribe cue."""
@@ -117,18 +131,18 @@ def _build_mode_instructions(mode, is_shorts):
 
     if mode == "deep_dive_evergreen":
         role_desc = (
-            "High-RPM Evergreen & Subscriber Growth Strategist — crafting high-retention stories "
-            "with strong reach and subscriber appeal across finance, AI/tech strategy, business models, and high-interest topics."
+            "High-RPM Evergreen & Documentary Storyteller — crafting high-retention stories "
+            "across finance, AI/tech strategy, business models, and high-interest topics."
         )
         if is_shorts:
             structure = """
-   - Scene 1: High-curiosity money/strategy or high-reach hook.
-   - Scenes 2-4: Clear, memorable breakdown of how it works or why it matters.
-   - Scene 5: Strong takeaway + Quick Shift Creative subscribe cue."""
+   - Scene 1 (tone: hook): High-curiosity money/strategy hook.
+   - Scenes 2-4 (tones: analytical / serious / excited): Clear breakdown of how it works and the hidden catch.
+   - Scene 5 (tone: calm): Strong takeaway + Quick Shift Creative subscribe cue."""
         else:
             structure = """
    Structure the 36 scenes for maximum watch time, US RPM, and subscriber conversion:
-   - Scenes 1-3 (Irresistible Hook): Start with a striking insight, number, or question that pulls viewers in.
+   - Scenes 1-3 (Irresistible Hook): Start with a striking insight, stat, or contradiction that pulls viewers in.
    - Scenes 4-10 (Origin & Core Mechanics): Explain the backstory and how the system/business actually operates.
    - Scenes 11-18 (The Numbers & Leverage): Break down margins, incentives, market forces, or key comparisons.
    - Scenes 19-26 (Hidden Bottlenecks & Competition): What most people overlook and how rivals respond.
@@ -137,21 +151,21 @@ def _build_mode_instructions(mode, is_shorts):
         return role_desc, structure
 
     role_desc = (
-        "Broadcast News & Markets Anchor — covering Gaming, Tech, AI, and Business/Market news "
-        "in a natural, conversational human voice."
+        "Broadcast News & Markets Host — covering Gaming, Tech, AI, and Business/Market news "
+        "in a natural, conversational human voice like Vox or ColdFusion."
     )
     if is_shorts:
         structure = """
-   - Scene 1: Fast breaking hook across Gaming, Tech, AI, or Market/Business news.
-   - Scenes 2-4: Key numbers, market reaction (green/red candles or business impact), and core facts.
-   - Scene 5: Bottom-line takeaway + Quick Shift Creative CTA."""
+   - Scene 1 (tone: hook): Fast breaking hook across Gaming, Tech, AI, or Market/Business news.
+   - Scenes 2-4 (tones: urgent / analytical / serious): Key numbers, market reaction, and real-world impact.
+   - Scene 5 (tone: calm): Bottom-line takeaway + Quick Shift Creative CTA."""
     else:
         structure = """
-   Structure the 36 scenes as a multi-segment briefing covering Gaming, Tech, AI, and Business/Market news:
-   - Scenes 1-3 (Opening Briefing): Tease the key stories across Tech/AI, Gaming, and Markets without cliché intros.
+   Structure the 36 scenes as a crisp multi-segment briefing covering Gaming, Tech, AI, and Business/Market news:
+   - Scenes 1-3 (Opening Hook): Drop right into the biggest headline and stakes without cliché intros.
    - Scenes 4-11 (Tech & AI Segment): Key product, model, or infrastructure developments and real-world impact.
    - Scenes 12-19 (Gaming Segment): Major game, studio, or industry updates and why players care.
-   - Scenes 20-27 (Market & Business Segment): Stock/index moves (red/green candle shifts), earnings, and business strategy.
+   - Scenes 20-27 (Market & Business Segment): Stock/index moves, earnings, and business strategy.
    - Scenes 28-33 (Cross-Sector Connections): How tech, AI, gaming, and capital markets intersect right now.
    - Scenes 34-36 (Sign-Off): Concise wrap-up, audience question, and Quick Shift Creative subscribe cue."""
     return role_desc, structure
@@ -179,6 +193,19 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
         f"Self-Learning Channel Memory -> Winning topics/angles: {', '.join(memory.get('winning_topics', [])[:4])}. "
         f"Avoid: {', '.join(memory.get('avoid_patterns', [])[:3])}."
     )
+
+    local_tracks = _list_local_music_tracks()
+    if local_tracks:
+        music_inventory_block = (
+            "AVAILABLE BACKGROUND MUSIC TRACKS in assets/music/:\n"
+            + "\n".join(f"- {t}" for t in local_tracks)
+            + "\nPick the SINGLE best filename from the list above for `music_direction.track_file`."
+        )
+    else:
+        music_inventory_block = (
+            "No custom files detected in assets/music/ yet. Set `music_direction.track_file` to \"auto\" "
+            "and specify the ideal mood & intensity so the audio engine matches future tracks automatically."
+        )
 
     extra_headlines = [] if custom_topic else _fetch_extra_mode_headlines(content_mode)
     combined_topics = []
@@ -208,12 +235,22 @@ Scene Structure Guide:
 
 {topic_block}
 
-Human-Like Writing Rules (CRITICAL):
-- Sound like an articulate, sharp human creator/analyst speaking naturally — NOT an AI template.
-- NEVER use AI clichés such as: "delve", "game-changer", "landscape", "buckle up", "revolutionary", "let's dive in", "in conclusion", "ever-evolving", "tapestry", "testament".
-- Vary sentence lengths naturally (mix short punchy sentences with clear explanatory sentences).
+{music_inventory_block}
+
+Human-Like Spoken Script Rules (CRITICAL):
+- Write like a real YouTube host talking to a smart friend — NEVER like a formal article or AI essay.
+- Sprinkle natural human conversational bridges across the script (e.g., "Wait, look at that number again.", "Sounds great on paper, right? Not quite.", "Here is where it gets messy.", "Think about what that actually means.").
+- Mix short 4-word punchy sentences with medium explanatory sentences so the voice rhythm feels alive.
+- NEVER use AI clichés: "delve", "game-changer", "landscape", "buckle up", "revolutionary", "let's dive in", "in conclusion", "ever-evolving", "tapestry", "testament", "welcome back".
 - NO emojis, NO markdown, NO stage directions in narration.
-- Each scene's "visual_query" must be 2-4 concrete English keywords for stock B-roll/photos (e.g., "nvidia gpu server", "wall street trading screen", "gaming controller neon").
+- For each scene, set `"tone"` to one of: `"hook"`, `"urgent"`, `"excited"`, `"serious"`, `"analytical"`, `"calm"`.
+- For each scene, set `"highlight_text"` to a short 4-8 word punchy stat or headline phrase for an editorial Newsroom Highlight Card (e.g., "Nvidia supply shock rattles Wall Street").
+- For each scene, set `"visual_query"` to 2-4 concrete English keywords for HD B-roll/photos.
+
+AI Background Music Direction Rules (CRITICAL):
+- Choose `"mood"` from: `"news"`, `"tense"`, `"energetic"`, `"deep_dive"`, `"business"`, `"calm"`.
+- Choose `"intensity"` from: `"subtle"` (serious/analytical/scandal — very gentle bed), `"balanced"` (standard news/deep dive), `"energetic"` (fast viral Shorts/gaming).
+- Choose `"volume_scale"` strictly between `0.06` and `0.11` based on the situation so background music enhances emotion without EVER overpowering the human voice.
 
 Return ONLY valid JSON:
 {{
@@ -226,10 +263,19 @@ Return ONLY valid JSON:
   "thumbnail_headline": "string",
   "thumbnail_subtext": "string",
   "thumbnail_query": "string",
+  "music_direction": {{
+    "track_file": "string",
+    "mood": "news",
+    "intensity": "balanced",
+    "volume_scale": 0.08,
+    "reason": "short explanation of why this music level fits the story"
+  }},
   "scenes": [
     {{
       "narration": "string",
-      "visual_query": "string"
+      "visual_query": "string",
+      "tone": "hook",
+      "highlight_text": "string"
     }}
   ]
 }}
@@ -238,7 +284,7 @@ Return ONLY valid JSON:
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.75,
+            "temperature": 0.78,
             "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
         },
@@ -246,6 +292,7 @@ Return ONLY valid JSON:
 
     models_to_try = _discover_gemini_models()
     last_error = None
+    valid_tones = {"hook", "urgent", "excited", "serious", "analytical", "calm"}
 
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
@@ -273,14 +320,41 @@ Return ONLY valid JSON:
                 if is_shorts and "#shorts" not in blueprint["title"].lower() and len(blueprint["title"]) <= 90:
                     blueprint["title"] += " #Shorts"
 
-                for sc in blueprint["scenes"]:
-                    sc["narration"] = _clean_narration(sc.get("narration", ""))
-                    sc["visual_query"] = sc.get("visual_query", "technology").strip()
+                md = blueprint.get("music_direction") or {}
+                try:
+                    v_scale = float(md.get("volume_scale", 0.08))
+                except Exception:
+                    v_scale = 0.08
+                blueprint["music_direction"] = {
+                    "track_file": str(md.get("track_file", "auto")).strip(),
+                    "mood": str(md.get("mood", "news")).strip().lower(),
+                    "intensity": str(md.get("intensity", "balanced")).strip().lower(),
+                    "volume_scale": max(0.055, min(0.115, v_scale)),
+                    "reason": str(md.get("reason", "Balanced editorial music bed")).strip(),
+                }
 
-                blueprint["scenes"] = [s for s in blueprint["scenes"] if s["narration"]]
+                cleaned_scenes = []
+                for idx_s, sc in enumerate(blueprint["scenes"]):
+                    nar = _clean_narration(sc.get("narration", ""))
+                    if not nar:
+                        continue
+                    tone = str(sc.get("tone", "hook" if idx_s == 0 else "analytical")).strip().lower()
+                    if tone not in valid_tones:
+                        tone = "analytical"
+                    cleaned_scenes.append({
+                        "narration": nar,
+                        "visual_query": str(sc.get("visual_query", "technology")).strip() or "technology",
+                        "tone": tone,
+                        "highlight_text": _clean_narration(sc.get("highlight_text", ""))[:72],
+                    })
+
+                blueprint["scenes"] = cleaned_scenes
                 if not blueprint["scenes"]:
                     raise ValueError("Empty scenes")
-                print(f"[ScriptAI] Blueprint generated with {model} ({len(blueprint['scenes'])} scenes)")
+                print(
+                    f"[ScriptAI] Blueprint generated with {model} ({len(blueprint['scenes'])} scenes) | "
+                    f"MusicAI -> {blueprint['music_direction']['mood']} ({blueprint['music_direction']['intensity']})"
+                )
                 return blueprint
             except Exception as e:
                 last_error = f"{model} error: {e}"
