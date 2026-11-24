@@ -141,33 +141,82 @@ def _create_motion_card_png(out_png, width, height, title_text, body_text, card_
     return out_png
 
 
-def _render_subclip(src_media, is_image, dur, out_mp4, width, height, is_shorts, rng, overlay_png=None, gif_path=None):
+def _detect_ticker_symbol(text):
+    low = (text or "").lower()
+    mapping = [
+        (("nvidia", "nvda", "jensen huang", "blackwell", "cuda"), "NVDA"),
+        (("intel", "intc"), "INTC"),
+        (("alphabet", "google", "googl"), "GOOGL"),
+        (("apple", "iphone", "aapl"), "AAPL"),
+        (("amazon", "aws", "amzn"), "AMZN"),
+        (("microsoft", "msft"), "MSFT"),
+        (("tesla", "tsla"), "TSLA"),
+        (("amd", "ryzen"), "AMD"),
+        (("meta", "zuckerberg"), "META"),
+    ]
+    for keys, sym in mapping:
+        if any(k in low for k in keys):
+            return sym
+    return "SPY"
+
+
+def _render_subclip(
+    src_media,
+    is_image,
+    dur,
+    out_mp4,
+    width,
+    height,
+    is_shorts,
+    rng,
+    overlay_png=None,
+    gif_path=None,
+    is_chart=False,
+):
+    """Plays MP4 videos/charts smoothly without freezing; applies Ken Burns zoompan ONLY to still photos."""
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
     fps = 24
     n_frames = max(12, int(round(dur * fps)))
-
-    scale_w = int(width * 1.12)
-    scale_h = int(height * 1.12)
-    scale_w += scale_w % 2
-    scale_h += scale_h % 2
-
-    zoom_start = 1.0
-    zoom_end = 1.08 if is_image else (1.06 if rng.random() > 0.35 else 1.02)
 
     inp_args = []
     filter_chain = []
 
     if src_media and os.path.exists(src_media):
         if is_image:
+            scale_w = int(width * 1.12)
+            scale_h = int(height * 1.12)
+            scale_w += scale_w % 2
+            scale_h += scale_h % 2
+            zoom_end = 1.08
             inp_args.extend(["-loop", "1", "-t", f"{dur:.3f}", "-i", src_media])
+            vf_parts = [
+                f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=increase",
+                f"crop={scale_w}:{scale_h}",
+                f"zoompan=z='min({zoom_end}, 1.0+({zoom_end}-1.0)*on/{max(1,n_frames)})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n_frames}:s={width}x{height}:fps={fps}",
+                "setsar=1",
+                "eq=contrast=1.06:brightness=-0.02:saturation=1.08",
+            ]
         else:
-            inp_args.extend(["-stream_loop", "-1", "-i", src_media])
-        vf_parts = [
-            f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=increase",
-            f"crop={scale_w}:{scale_h}",
-            f"zoompan=z='min({zoom_end}, {zoom_start}+({zoom_end}-{zoom_start})*on/{max(1,n_frames)})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n_frames}:s={width}x{height}:fps={fps}",
-            "eq=contrast=1.06:brightness=-0.02:saturation=1.08",
-        ]
+            # Play real video/chart motion smoothly (no zoompan freeze!)
+            if is_chart:
+                inp_args.extend(["-i", src_media])
+                vf_parts = [
+                    f"scale={width}:{height}:force_original_aspect_ratio=increase",
+                    f"crop={width}:{height}",
+                    f"fps={fps}",
+                    "setsar=1",
+                ]
+            else:
+                inp_args.extend(["-stream_loop", "-1", "-i", src_media])
+                vf_parts = [
+                    "trim=start=0.4",
+                    "setpts=PTS-STARTPTS",
+                    f"scale={width}:{height}:force_original_aspect_ratio=increase",
+                    f"crop={width}:{height}",
+                    f"fps={fps}",
+                    "setsar=1",
+                    "eq=contrast=1.06:brightness=-0.02:saturation=1.08",
+                ]
         filter_chain.append(f"[0:v]{','.join(vf_parts)}[base]")
         next_inp = 1
     else:
@@ -211,12 +260,16 @@ def _render_subclip(src_media, is_image, dur, out_mp4, width, height, is_shorts,
 
 
 def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_dir, out_audio_wav):
+    """Studio-grade broadcast voice mastering with properly split SFX and sidechain music ducking."""
     rng = random.Random(404)
+
+    # Broadcast vocal chain: rumble cut + warm low-mid + crisp 3kHz clarity + smooth compression + LUFS normalization
     v_filt = (
-        "highpass=f=85,lowpass=f=14500,"
-        "equalizer=f=180:width_type=o:width=1.5:g=2.5,"
-        "acompressor=threshold=-18dB:ratio=3:attack=10:release=120:makeup=2.0,"
-        "loudnorm=I=-15:TP=-1.5:LRA=11"
+        "highpass=f=80,lowpass=f=15000,"
+        "equalizer=f=160:width_type=o:width=1.4:g=2.2,"
+        "equalizer=f=3000:width_type=o:width=1.2:g=2.0,"
+        "acompressor=threshold=-18dB:ratio=2.8:attack=12:release=140:makeup=1.8,"
+        "loudnorm=I=-15:TP=-1.5:LRA=9"
     )
     v_master = os.path.join(work_dir, "voice_mastered.wav")
     _run_ffmpeg(["ffmpeg", "-y", "-i", voice_concat_mp3, "-af", v_filt, "-ar", "44100", "-ac", "2", v_master])
@@ -224,11 +277,11 @@ def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_d
     music_file = _pick_music_bed(mode, is_shorts, rng)
     sfx_pool = _all_sfx_files()
 
-    sfx_whoosh = fetch_freesound_sfx("whoosh transition", os.path.join(work_dir, "fs_whoosh.mp3"))
+    sfx_whoosh = fetch_freesound_sfx("short whoosh transition", os.path.join(work_dir, "fs_whoosh.mp3"))
     if not sfx_whoosh:
         sfx_whoosh = _pick_sfx_by_keywords(sfx_pool, ["whoosh", "swipe", "glitch"], rng)
 
-    accent_q = "news alert chime" if mode == "news_bulletin" else "pop notification"
+    accent_q = "news chime" if mode == "news_bulletin" else "subtle pop"
     sfx_accent = fetch_freesound_sfx(accent_q, os.path.join(work_dir, "fs_accent.mp3"))
     if not sfx_accent:
         sfx_accent = _pick_sfx_by_keywords(sfx_pool, ["market", "pop", "boom", "riser"], rng)
@@ -238,46 +291,74 @@ def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_d
     parts = ["[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[vnorm]"]
     cur_v = "[vnorm]"
 
-    if music_file:
+    # Proper music ducking: music is compressed BY voice sidechain, then mixed cleanly under voice
+    if music_file and os.path.exists(music_file):
         inputs.extend(["-stream_loop", "-1", "-i", music_file])
-        parts.append(f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:{total_dur:.2f},volume=0.075[mbase]")
-        parts.append(f"{cur_v}[mbase]sidechaincompress=threshold=0.04:ratio=4:attack=20:release=250:level_sc=0.8[vmix]")
+        parts.append(f"{cur_v}asplit=2[v_for_mix][v_for_sc]")
+        parts.append(
+            f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"atrim=0:{total_dur:.2f},volume=0.085[mbase]"
+        )
+        parts.append("[mbase][v_for_sc]sidechaincompress=threshold=0.03:ratio=5:attack=20:release=250[mduck]")
+        parts.append("[v_for_mix][mduck]amix=inputs=2:duration=first:normalize=0[vmix]")
         cur_v = "[vmix]"
         idx += 1
 
-    if sfx_whoosh and total_dur > 6.0:
-        inputs.extend(["-i", sfx_whoosh])
-        w_idx = idx
-        idx += 1
-        parts.append(f"[{w_idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.22[w_raw]")
-        w_labels = []
-        t_cur = 4.5
-        k = 0
-        while t_cur < total_dur - 1.5 and k < 65:
-            d_ms = int(t_cur * 1000)
-            parts.append(f"[w_raw]adelay={d_ms}|{d_ms}[wd{k}]")
-            w_labels.append(f"[wd{k}]")
-            t_cur += 9.0
-            k += 1
-        if w_labels:
-            parts.append(f"{cur_v}{''.join(w_labels)}amix=inputs={1 + len(w_labels)}:normalize=0[am_w]")
+    # Proper SFX layering using asplit (each delayed copy gets its own dedicated pad — zero voice echo!)
+    if sfx_whoosh and os.path.exists(sfx_whoosh) and total_dur > 8.0:
+        hit_times = []
+        t_cur = 6.0
+        while t_cur < total_dur - 2.0 and len(hit_times) < 35:
+            hit_times.append(int(t_cur * 1000))
+            t_cur += 12.0
+
+        if hit_times:
+            inputs.extend(["-i", sfx_whoosh])
+            w_idx = idx
+            idx += 1
+            if len(hit_times) == 1:
+                parts.append(
+                    f"[{w_idx}:a]atrim=0:1.1,afade=t=out:st=0.8:d=0.3,"
+                    f"aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                    f"volume=0.16,adelay={hit_times[0]}|{hit_times[0]}[sfx_track]"
+                )
+            else:
+                split_outs = "".join(f"[ws{k}]" for k in range(len(hit_times)))
+                parts.append(
+                    f"[{w_idx}:a]atrim=0:1.1,afade=t=out:st=0.8:d=0.3,"
+                    f"aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                    f"volume=0.16,asplit={len(hit_times)}{split_outs}"
+                )
+                w_labels = []
+                for k, d_ms in enumerate(hit_times):
+                    parts.append(f"[ws{k}]adelay={d_ms}|{d_ms}[wd{k}]")
+                    w_labels.append(f"[wd{k}]")
+                parts.append(f"{''.join(w_labels)}amix=inputs={len(w_labels)}:duration=longest:normalize=0[sfx_track]")
+
+            parts.append(f"{cur_v}[sfx_track]amix=inputs=2:duration=first:normalize=0[am_w]")
             cur_v = "[am_w]"
 
-    if sfx_accent and total_dur > 10.0:
+    if sfx_accent and os.path.exists(sfx_accent) and total_dur > 10.0:
         inputs.extend(["-i", sfx_accent])
         m_sfx_idx = idx
         idx += 1
         d_ms = int(min(total_dur * 0.42, 160.0) * 1000)
-        parts.append(f"[{m_sfx_idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.28,adelay={d_ms}|{d_ms}[msfx]")
-        parts.append(f"{cur_v}[msfx]amix=inputs=2:normalize=0[am_final]")
-        cur_v = "[am_final]"
+        parts.append(
+            f"[{m_sfx_idx}:a]atrim=0:1.4,afade=t=out:st=1.0:d=0.4,"
+            f"aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"volume=0.22,adelay={d_ms}|{d_ms}[msfx]"
+        )
+        parts.append(f"{cur_v}[msfx]amix=inputs=2:duration=first:normalize=0[am_acc]")
+        cur_v = "[am_acc]"
 
-    final_tag = cur_v.strip("[]")
+    # Final safety limiter so audio never clips
+    parts.append(f"{cur_v}alimiter=limit=0.95[am_final]")
+
     cmd = [
         "ffmpeg", "-y",
         *inputs,
         "-filter_complex", ";".join(parts),
-        "-map", f"[{final_tag}]",
+        "-map", "[am_final]",
         "-t", f"{total_dur:.3f}",
         out_audio_wav,
     ]
@@ -353,21 +434,23 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
         n_cuts = max(1, min(4, int(round(dur / cut_target))))
         cut_dur = dur / n_cuts
 
+        combined_text = narration + " " + query
         is_market_scene = any(
-            k in (narration + " " + query).lower()
-            for k in ("stock", "market", "candle", "nasdaq", "s&p", "rally", "crash", "drop", "nvda", "price", "earnings")
+            k in combined_text.lower()
+            for k in ("stock", "market", "candle", "nasdaq", "s&p", "rally", "crash", "drop", "nvda", "nvidia", "price", "earnings", "portfolio", "margin")
         )
         bearish_flag = any(
-            w in (narration + " " + query).lower()
-            for w in ("drop", "crash", "fall", "bear", "plunge", "down", "loss")
+            w in combined_text.lower()
+            for w in ("drop", "crash", "fall", "bear", "plunge", "down", "loss", "scandal", "pullback", "risk")
         )
 
         for c_i in range(n_cuts):
             sub_mp4 = os.path.join(work_dir, f"sub_{idx:03d}_{c_i:02d}.mp4")
             src_media = None
             is_img = False
+            is_chart = False
 
-            if is_market_scene and c_i == 0:
+            if is_market_scene and c_i == 0 and (idx % 3 == 0):
                 chart_mp4 = os.path.join(work_dir, f"chart_{idx:03d}.mp4")
                 try:
                     render_animated_candlestick_clip(
@@ -375,11 +458,12 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
                         width=width,
                         height=height,
                         duration=cut_dur,
-                        symbol="NVDA" if "nvda" in narration.lower() else "SPY",
+                        symbol=_detect_ticker_symbol(combined_text),
                         bearish_bias=bearish_flag,
                     )
                     src_media = chart_mp4
                     is_img = False
+                    is_chart = True
                 except Exception:
                     src_media = None
 
@@ -430,10 +514,10 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
                 rng,
                 overlay_png=overlay_png,
                 gif_path=gif_pick,
+                is_chart=is_chart,
             )
             subclips.append(sub_mp4)
 
-    # Use absolute paths so FFmpeg concat always resolves every subclip cleanly
     concat_list_txt = os.path.join(work_dir, "visual_concat.txt")
     with open(concat_list_txt, "w", encoding="utf-8") as f:
         for sp in subclips:
