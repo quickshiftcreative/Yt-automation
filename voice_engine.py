@@ -1,222 +1,244 @@
 import asyncio
+import inspect
 import os
 import random
-import re
 import subprocess
-import time
 import edge_tts
-from config import VOICE_MAP, VOICE_STYLE
 
-# 8 Distinct US Neural Voices (4 Male + 4 Female) tuned by content style
-US_MALE_VOICES = [
-    "en-US-AndrewNeural",       # Warm, authoritative documentary & tech lead
-    "en-US-BrianNeural",        # Crisp, trustworthy news anchor
-    "en-US-GuyNeural",          # High-energy, engaging viral & gaming host
-    "en-US-ChristopherNeural",  # Deep, analytical deep-dive narrator
-]
-
-US_FEMALE_VOICES = [
-    "en-US-AvaNeural",          # Expressive, modern US tech & culture anchor
-    "en-US-EmmaNeural",         # Clear, intelligent documentary & market analyst
-    "en-US-JennyNeural",        # Energetic, conversational viral & gaming host
-    "en-US-AriaNeural",         # Sharp, broadcast news co-anchor
-]
-
-MODE_VOICE_PROFILES = {
-    # Dual-anchor Male + Female rotation for Long News Bulletins
-    "news_bulletin": {
-        "dual_anchor": True,
-        "male": ["en-US-BrianNeural", "en-US-AndrewNeural"],
-        "female": ["en-US-AriaNeural", "en-US-AvaNeural"],
-        "rate": "+6%",
-    },
-    # High-energy voices for Trending Games / Gamers / Viral Topics
-    "trending_viral": {
-        "dual_anchor": False,
-        "male": ["en-US-GuyNeural", "en-US-AndrewNeural"],
-        "female": ["en-US-JennyNeural", "en-US-AvaNeural"],
-        "rate": "+8%",
-    },
-    # Authoritative documentary voices for 8-10 min Deep Dives & Versus
-    "deep_dive_evergreen": {
-        "dual_anchor": False,
-        "male": ["en-US-AndrewNeural", "en-US-ChristopherNeural"],
-        "female": ["en-US-EmmaNeural", "en-US-AvaNeural"],
-        "rate": "+4%",
-    },
+# Dynamic speed & pitch per scene tone for natural, non-robotic delivery
+TONE_PROSODY = {
+    "hook":       ("+7%", "+2Hz"),
+    "urgent":     ("+9%", "+1Hz"),
+    "excited":    ("+8%", "+3Hz"),
+    "serious":    ("-3%", "-2Hz"),
+    "analytical": ("+2%", "+0Hz"),
+    "calm":       ("-2%", "-1Hz"),
 }
 
+MALE_VOICES = ["en-US-AndrewNeural", "en-US-BrianNeural"]
+FEMALE_VOICES = ["en-US-AvaNeural", "en-US-EmmaNeural"]
 
-def get_audio_duration(audio_path):
+
+def _pick_voice():
+    style = os.getenv("VOICE_STYLE", "auto").strip().lower()
+    if style == "male_us":
+        return random.choice(MALE_VOICES)
+    if style == "female_us":
+        return random.choice(FEMALE_VOICES)
+    return random.choice(MALE_VOICES + FEMALE_VOICES)
+
+
+def _probe_duration(media_path):
     cmd = [
-        "ffprobe",
-        "-v", "error",
+        "ffprobe", "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
-        audio_path,
+        media_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return float(result.stdout.strip())
+    out = subprocess.check_output(cmd, text=True).strip()
+    return max(0.5, float(out))
 
 
-def _sanitize_tts_text(text):
-    """Cleans characters that occasionally trigger Edge-TTS empty audio responses."""
-    text = re.sub(r"[\"'`“”‘’*_#~<>|\[\]{}]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    if text and text[-1] not in ".!?":
-        text += "."
-    return text
+def _format_ass_time(seconds):
+    seconds = max(0.0, float(seconds))
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    cs = int(round((seconds - int(seconds)) * 100))
+    if cs >= 100:
+        cs = 99
+    return f"{hrs}:{mins:02d}:{secs:02d}.{cs:02d}"
 
 
-async def _synthesize_one(text, out_path, voice, rate="+5%"):
-    communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)
-    await communicate.save(out_path)
-    if not os.path.exists(out_path) or os.path.getsize(out_path) < 400:
-        raise RuntimeError("Empty audio file returned by TTS")
+def _escape_ass(text):
+    return (text or "").replace("\\", "").replace("{", "").replace("}", "").replace("\n", " ").strip()
 
 
-def _create_fallback_silence(out_path, duration=3.0):
-    """Emergency fallback so a 36-scene render never crashes on a single TTS glitch."""
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi",
-        "-i", "anullsrc=r=24000:cl=mono",
-        "-t", str(duration),
-        "-q:a", "9",
-        out_path,
-    ]
-    subprocess.run(cmd, capture_output=True, check=True)
+def _supports_boundary_param():
+    try:
+        return "boundary" in inspect.signature(edge_tts.Communicate.__init__).parameters
+    except Exception:
+        return False
 
 
-def _format_srt_time(seconds):
-    ms = int(round((seconds - int(seconds)) * 1000))
-    total_sec = int(seconds)
-    if ms >= 1000:
-        ms = 0
-        total_sec += 1
-    hrs = total_sec // 3600
-    mins = (total_sec % 3600) // 60
-    secs = total_sec % 60
-    return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
+async def _synthesize_scene(text, voice, rate, pitch, out_raw_mp3):
+    kwargs = {"voice": voice, "rate": rate, "pitch": pitch}
+    if _supports_boundary_param():
+        kwargs["boundary"] = "WordBoundary"
+
+    comm = edge_tts.Communicate(text, **kwargs)
+    words = []
+    audio_bytes = bytearray()
+
+    async for chunk in comm.stream():
+        ctype = chunk.get("type")
+        if ctype == "audio":
+            audio_bytes.extend(chunk.get("data", b""))
+        elif ctype == "WordBoundary":
+            w_text = _escape_ass(chunk.get("text", ""))
+            if w_text:
+                start_s = float(chunk.get("offset", 0)) / 10_000_000.0
+                dur_s = max(0.08, float(chunk.get("duration", 1200000)) / 10_000_000.0)
+                words.append({"text": w_text, "start": start_s, "end": start_s + dur_s})
+
+    with open(out_raw_mp3, "wb") as f:
+        f.write(audio_bytes)
+    return words
 
 
-def _split_caption_chunks(text, words_per_chunk=5):
-    words = text.split()
-    if not words:
-        return []
-    return [" ".join(words[i : i + words_per_chunk]) for i in range(0, len(words), words_per_chunk)]
+def _build_word_chunks(words, max_words=3, max_chars=22):
+    chunks = []
+    cur = []
+    for w in words:
+        cand = cur + [w]
+        joined = " ".join(x["text"] for x in cand)
+        if cur and (len(cand) > max_words or len(joined) > max_chars):
+            chunks.append(cur)
+            cur = [w]
+        else:
+            cur = cand
+    if cur:
+        chunks.append(cur)
+    return chunks
 
 
-def _select_voice_plan(total_scenes):
-    """Builds a smart per-scene US voice lineup based on content mode, format & style."""
-    mode = os.getenv("CONTENT_MODE", "news_bulletin").strip().lower()
-    video_format = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower()
-    style = (VOICE_STYLE or "auto").strip().lower()
+def _write_pop_captions_ass(all_word_events, ass_path, is_shorts):
+    play_x, play_y = (1080, 1920) if is_shorts else (1920, 1080)
+    font_size = 74 if is_shorts else 60
+    margin_v = 360 if is_shorts else 88
+    outline_w = 6 if is_shorts else 5
 
-    profile = MODE_VOICE_PROFILES.get(mode, MODE_VOICE_PROFILES["news_bulletin"])
-    rate = profile["rate"]
-    is_long = video_format != "shorts" and total_scenes >= 12
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {play_x}
+PlayResY: {play_y}
+WrapStyle: 2
+ScaledBorderAndShadow: yes
 
-    if style == "male_us":
-        lead = random.choice(profile["male"])
-        return [lead] * total_scenes, rate, f"US Male ({lead})"
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: PopCap,DejaVu Sans,{font_size},&H00FFFFFF,&H0000D7FF,&H00080A0E,&H90000000,-1,0,0,0,100,100,0,0,1,{outline_w},2,2,60,60,{margin_v},1
 
-    if style == "female_us":
-        lead = random.choice(profile["female"])
-        return [lead] * total_scenes, rate, f"US Female ({lead})"
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    max_w = 3 if is_shorts else 4
+    max_c = 18 if is_shorts else 28
 
-    # Auto mode: adapts to video type (Dual-Anchor Male+Female for News Bulletin, curated host otherwise)
-    if profile["dual_anchor"] and is_long:
-        m_voice = random.choice(profile["male"])
-        f_voice = random.choice(profile["female"])
-        plan = []
-        # Switch anchor every 4 scenes (matches bulletin segments naturally)
-        for i in range(total_scenes):
-            block = (i // 4) % 2
-            plan.append(m_voice if block == 0 else f_voice)
-        return plan, rate, f"Dual-Anchor Broadcast ({m_voice} + {f_voice})"
+    for scene_words in all_word_events:
+        chunks = _build_word_chunks(scene_words, max_words=max_w, max_chars=max_c)
+        for ch in chunks:
+            for active_i, w_act in enumerate(ch):
+                t0 = w_act["start"]
+                if active_i + 1 < len(ch):
+                    t1 = max(t0 + 0.06, ch[active_i + 1]["start"])
+                else:
+                    t1 = max(t0 + 0.12, w_act["end"] + 0.05)
 
-    # Single host auto-picked from matching Male/Female pool for this mode
-    pool = profile["male"] + profile["female"]
-    chosen = random.choice(pool)
-    return [chosen] * total_scenes, rate, f"Auto Smart Pick ({chosen})"
+                rendered_tokens = []
+                for j, w_tok in enumerate(ch):
+                    tok_upper = w_tok["text"].upper() if is_shorts else w_tok["text"]
+                    if j == active_i:
+                        # Bright gold/yellow pop highlight on the exact active word
+                        rendered_tokens.append(
+                            f"{{\\c&H00D7FF&\\fscx108\\fscy108}}{tok_upper}{{\\c&HFFFFFF&\\fscx100\\fscy100}}"
+                        )
+                    else:
+                        rendered_tokens.append(tok_upper)
+
+                line_txt = " ".join(rendered_tokens)
+                lines.append(
+                    f"Dialogue: 0,{_format_ass_time(t0)},{_format_ass_time(t1)},PopCap,,0,0,0,,{line_txt}\n"
+                )
+
+    with open(ass_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
 
 
-def generate_scene_voices_and_srt(scenes, work_dir, srt_path):
-    """Generates US neural voiceovers (8-voice pool + dual-anchor support) and synced SRT."""
-    voice_plan, rate, plan_label = _select_voice_plan(len(scenes))
-    backup_pool = US_MALE_VOICES + US_FEMALE_VOICES
+def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
+    os.makedirs(work_dir, exist_ok=True)
+    is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
+    voice = _pick_voice()
+    breath_pad = 0.14 if is_shorts else 0.26
+
+    print(f"[Voice] Active Neural Host: {voice} | Dynamic Tone Prosody + Word-Pop Captions ON")
 
     scene_audio_info = []
-    srt_entries = []
-    current_time = 0.0
-    srt_index = 1
+    all_word_events = []
+    timeline_cursor = 0.0
 
-    print(f"[Voice] Mode Plan: {plan_label} | Rate: {rate}")
-    for idx, scene in enumerate(scenes):
-        raw_narration = scene["narration"]
-        clean_narration = _sanitize_tts_text(raw_narration)
-        mp3_path = os.path.join(work_dir, f"voice_{idx:02d}.mp3")
-        primary_voice = voice_plan[idx]
+    for i, sc in enumerate(scenes):
+        narration = sc.get("narration", "").strip()
+        if not narration:
+            continue
 
-        # Small pacing pause every 6 scenes to prevent Edge-TTS rate throttling
-        if idx > 0 and idx % 6 == 0:
-            time.sleep(1.5)
-        elif idx > 0:
-            time.sleep(0.35)
+        tone = sc.get("tone", "hook" if i == 0 else "analytical").strip().lower()
+        base_rate, base_pitch = TONE_PROSODY.get(tone, ("+2%", "+0Hz"))
+        if is_shorts and tone not in ("hook", "urgent", "excited"):
+            base_rate = "+6%"
 
-        synthesized = False
-        last_err = None
+        raw_mp3 = os.path.join(work_dir, f"raw_voice_{i:03d}.mp3")
+        clean_mp3 = os.path.join(work_dir, f"voice_{i:03d}.mp3")
 
-        for attempt in range(6):
-            # Switch to backup US voices if primary voice hits temporary Microsoft throttling
-            if attempt < 3:
-                active_voice = primary_voice
-            else:
-                active_voice = backup_pool[(idx + attempt) % len(backup_pool)]
+        try:
+            words = asyncio.run(_synthesize_scene(narration, voice, base_rate, base_pitch, raw_mp3))
+        except Exception as e:
+            print(f"[Voice] Retry fallback voice on scene {i + 1}: {e}")
+            words = asyncio.run(_synthesize_scene(narration, "en-US-AndrewNeural", "+2%", "+0Hz", raw_mp3))
 
-            try:
-                asyncio.run(_synthesize_one(clean_narration, mp3_path, active_voice, rate=rate))
-                synthesized = True
-                break
-            except Exception as e:
-                last_err = e
-                wait_sec = min(8.0, 1.2 * (attempt + 1))
-                print(f"[Voice] Retry {attempt + 1}/6 scene {idx + 1} ({active_voice}): {e}")
-                time.sleep(wait_sec)
+        # Standardize sample rate + add natural human breath pause between scenes
+        pad_sec = 0.05 if i == len(scenes) - 1 else breath_pad
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", raw_mp3,
+                "-af", f"apad=pad_dur={pad_sec:.2f}",
+                "-ar", "44100", "-ac", "2",
+                "-c:a", "libmp3lame", "-q:a", "3",
+                clean_mp3,
+            ],
+            capture_output=True,
+            check=True,
+        )
 
-        if not synthesized:
-            print(f"[Voice] Warning: Using silent placeholder for scene {idx + 1} after retries ({last_err})")
-            _create_fallback_silence(mp3_path, duration=3.0)
+        dur = _probe_duration(clean_mp3)
 
-        duration = get_audio_duration(mp3_path)
+        # Fallback word timing if Edge-TTS didn't emit WordBoundary events
+        if not words:
+            raw_tokens = narration.split()
+            speak_dur = max(0.5, dur - pad_sec)
+            step = speak_dur / max(1, len(raw_tokens))
+            words = [
+                {"text": _escape_ass(tok), "start": k * step, "end": (k + 1) * step}
+                for k, tok in enumerate(raw_tokens)
+                if _escape_ass(tok)
+            ]
+
+        shifted_words = [
+            {
+                "text": w["text"],
+                "start": timeline_cursor + w["start"],
+                "end": timeline_cursor + w["end"],
+            }
+            for w in words
+        ]
+        all_word_events.append(shifted_words)
+
+        print(f"[Voice] Scene {i + 1}/{len(scenes)} [{tone} | {base_rate}, {base_pitch}] -> {dur:.2f}s")
+
         scene_audio_info.append({
-            "index": idx,
-            "audio_path": mp3_path,
-            "duration": duration,
-            "visual_query": scene["visual_query"],
-            "narration": raw_narration,
+            "index": i,
+            "audio_path": clean_mp3,
+            "duration": dur,
+            "start_time": timeline_cursor,
+            "end_time": timeline_cursor + dur,
+            "narration": narration,
+            "visual_query": sc.get("visual_query", "technology"),
+            "tone": tone,
+            "highlight_text": sc.get("highlight_text", ""),
         })
+        timeline_cursor += dur
 
-        chunks = _split_caption_chunks(raw_narration, words_per_chunk=5)
-        total_words = max(1, len(raw_narration.split()))
-        chunk_start = current_time
-        for chunk in chunks:
-            chunk_words = len(chunk.split())
-            chunk_dur = duration * (chunk_words / total_words)
-            chunk_end = min(current_time + duration, chunk_start + chunk_dur)
-            srt_entries.append(
-                f"{srt_index}\n"
-                f"{_format_srt_time(chunk_start)} --> {_format_srt_time(chunk_end)}\n"
-                f"{chunk}\n"
-            )
-            srt_index += 1
-            chunk_start = chunk_end
-
-        current_time += duration
-        print(f"[Voice] Scene {idx + 1}/{len(scenes)} [{primary_voice}] ({duration:.2f}s)")
-
-    with open(srt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(srt_entries))
-
-    return scene_audio_info, current_time
+    ass_out = subtitle_path if subtitle_path.lower().endswith(".ass") else subtitle_path.rsplit(".", 1)[0] + ".ass"
+    _write_pop_captions_ass(all_word_events, ass_out, is_shorts)
+    return scene_audio_info, timeline_cursor
