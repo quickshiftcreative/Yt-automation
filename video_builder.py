@@ -3,7 +3,6 @@ import os
 import random
 import subprocess
 from PIL import Image, ImageDraw, ImageFont
-from config import VIDEO_FORMAT
 from chart_animator import render_animated_candlestick_clip
 from media_fetcher import (
     fetch_broll_clip,
@@ -15,6 +14,15 @@ from media_fetcher import (
 
 def _repo_root():
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def _run_ffmpeg(cmd):
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+    except subprocess.CalledProcessError as e:
+        err_msg = (e.stderr or b"").decode("utf-8", errors="ignore")[-900:]
+        print(f"[FFmpeg Error] {err_msg}")
+        raise
 
 
 def _all_sfx_files():
@@ -134,7 +142,6 @@ def _create_motion_card_png(out_png, width, height, title_text, body_text, card_
 
 
 def _render_subclip(src_media, is_image, dur, out_mp4, width, height, is_shorts, rng, overlay_png=None, gif_path=None):
-    """Renders a subclip (video or Unsplash HD photo) with smooth Ken Burns motion + optional card & Giphy reaction."""
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
     fps = 24
     n_frames = max(12, int(round(dur * fps)))
@@ -199,7 +206,7 @@ def _render_subclip(src_media, is_image, dur, out_mp4, width, height, is_shorts,
         "-pix_fmt", "yuv420p",
         out_mp4,
     ]
-    subprocess.run(cmd, capture_output=True, check=True)
+    _run_ffmpeg(cmd)
     return out_mp4
 
 
@@ -212,11 +219,7 @@ def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_d
         "loudnorm=I=-15:TP=-1.5:LRA=11"
     )
     v_master = os.path.join(work_dir, "voice_mastered.wav")
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", voice_concat_mp3, "-af", v_filt, "-ar", "44100", "-ac", "2", v_master],
-        capture_output=True,
-        check=True,
-    )
+    _run_ffmpeg(["ffmpeg", "-y", "-i", voice_concat_mp3, "-af", v_filt, "-ar", "44100", "-ac", "2", v_master])
 
     music_file = _pick_music_bed(mode, is_shorts, rng)
     sfx_pool = _all_sfx_files()
@@ -278,13 +281,13 @@ def _master_voice_and_music(voice_concat_mp3, total_dur, mode, is_shorts, work_d
         "-t", f"{total_dur:.3f}",
         out_audio_wav,
     ]
-    subprocess.run(cmd, capture_output=True, check=True)
+    _run_ffmpeg(cmd)
     return out_audio_wav
 
 
 def _burn_subtitles(video_mp4, srt_path, out_mp4, is_shorts):
     if not srt_path or not os.path.exists(srt_path) or os.path.getsize(srt_path) == 0:
-        subprocess.run(["ffmpeg", "-y", "-i", video_mp4, "-c", "copy", out_mp4], capture_output=True, check=True)
+        _run_ffmpeg(["ffmpeg", "-y", "-i", video_mp4, "-c", "copy", out_mp4])
         return out_mp4
 
     font_size = 18 if is_shorts else 20
@@ -294,7 +297,7 @@ def _burn_subtitles(video_mp4, srt_path, out_mp4, is_shorts):
         f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00080A0E,BackColour=&H88000000,"
         f"BorderStyle=3,Outline=2,Shadow=1,MarginV={margin_v}"
     )
-    escaped_srt = srt_path.replace("\\", "/").replace(":", "\\:")
+    escaped_srt = os.path.abspath(srt_path).replace("\\", "/").replace(":", "\\:")
     cmd = [
         "ffmpeg", "-y",
         "-i", video_mp4,
@@ -307,7 +310,7 @@ def _burn_subtitles(video_mp4, srt_path, out_mp4, is_shorts):
         "-pix_fmt", "yuv420p",
         out_mp4,
     ]
-    subprocess.run(cmd, capture_output=True, check=True)
+    _run_ffmpeg(cmd)
     return out_mp4
 
 
@@ -328,7 +331,7 @@ def _gif_query_for_scene(narration, mode, bearish_flag, is_market):
 
 def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
     os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
-    is_shorts = VIDEO_FORMAT == "shorts"
+    is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
     mode = os.getenv("CONTENT_MODE", "news_bulletin").strip().lower()
     width, height = (1080, 1920) if is_shorts else (1920, 1080)
     orient = "portrait" if is_shorts else "landscape"
@@ -364,7 +367,6 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
             src_media = None
             is_img = False
 
-            # 1. Market candlestick clip on market scenes
             if is_market_scene and c_i == 0:
                 chart_mp4 = os.path.join(work_dir, f"chart_{idx:03d}.mp4")
                 try:
@@ -381,7 +383,6 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
                 except Exception:
                     src_media = None
 
-            # 2. Mix HD stock video B-roll and Unsplash HD editorial photos (with Ken Burns zoom)
             if not src_media:
                 if c_i % 2 == 1:
                     photo_dl = os.path.join(work_dir, f"photo_{idx:03d}_{c_i:02d}.jpg")
@@ -397,7 +398,6 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
                         src_media = fetch_stock_image(query, photo_dl, orientation=orient, used_urls=used_urls)
                         is_img = True
 
-            # 3. Clean Stat / Insight card on key long-scene moments
             overlay_png = None
             if c_i == 1 and dur >= 6.0 and (idx % 3 == 0):
                 card_p = os.path.join(work_dir, f"card_{idx:03d}.png")
@@ -413,7 +413,6 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
                 )
                 overlay_png = card_p
 
-            # 4. Real Giphy reaction sticker/GIF on select hooks
             gif_pick = None
             if c_i == 0 and (idx % 4 == 1):
                 g_q = _gif_query_for_scene(narration, mode, bearish_flag, is_market_scene)
@@ -434,40 +433,40 @@ def build_final_video(scene_audio_info, srt_path, work_dir, output_video_path):
             )
             subclips.append(sub_mp4)
 
+    # Use absolute paths so FFmpeg concat always resolves every subclip cleanly
     concat_list_txt = os.path.join(work_dir, "visual_concat.txt")
     with open(concat_list_txt, "w", encoding="utf-8") as f:
         for sp in subclips:
-            f.write(f"file '{sp.replace(os.sep, '/')}'\n")
+            abs_sp = os.path.abspath(sp).replace(os.sep, "/")
+            f.write(f"file '{abs_sp}'\n")
 
     raw_video = os.path.join(work_dir, "visual_merged.mp4")
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_txt, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p", raw_video],
-        capture_output=True,
-        check=True,
-    )
+    _run_ffmpeg([
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", concat_list_txt,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+        raw_video,
+    ])
 
     voice_list_txt = os.path.join(work_dir, "voice_concat.txt")
     with open(voice_list_txt, "w", encoding="utf-8") as f:
         for vp in voice_files:
-            f.write(f"file '{vp.replace(os.sep, '/')}'\n")
+            abs_vp = os.path.abspath(vp).replace(os.sep, "/")
+            f.write(f"file '{abs_vp}'\n")
 
     voice_merged = os.path.join(work_dir, "voice_merged.mp3")
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", voice_list_txt, "-c:a", "libmp3lame", "-q:a", "3", voice_merged],
-        capture_output=True,
-        check=True,
-    )
+    _run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", voice_list_txt, "-c:a", "libmp3lame", "-q:a", "3", voice_merged])
 
     total_dur = sum(float(x["duration"]) for x in scene_audio_info)
     master_wav = os.path.join(work_dir, "audio_master.wav")
     _master_voice_and_music(voice_merged, total_dur, mode, is_shorts, work_dir, master_wav)
 
     combined_mp4 = os.path.join(work_dir, "video_with_audio.mp4")
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_video, "-i", master_wav, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", combined_mp4],
-        capture_output=True,
-        check=True,
-    )
+    _run_ffmpeg([
+        "ffmpeg", "-y", "-i", raw_video, "-i", master_wav,
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+        combined_mp4,
+    ])
 
     _burn_subtitles(combined_mp4, srt_path, output_video_path, is_shorts)
     return output_video_path
