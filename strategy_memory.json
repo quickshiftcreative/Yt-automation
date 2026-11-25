@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-11-25T04:34:34.457249+00:00",
+  "updated_at": "2026-11-25T09:03:12.140482+00:00",
   "winning_topics": [
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans #Shorts",
     "OpenAI's Chief Scientist Demands Limits on AI Development NOW! #Shorts",
     "Jensen Huang Returns: Nvidia Soars 31% #Shorts",
-    "For workplace culture champions, Jensen Huang's return is 'unfathomable' #Shorts",
-    "Signal Bans Screenshots to Stop AI Surveillance Threat! #Shorts"
+    "How GTA 6 Uses Real Drivers for Perfect Handling #Shorts",
+    "For workplace culture champions, Jensen Huang's return is 'unfathomable' #Shorts"
   ],
   "avoid_patterns": [
     "generic filler intros",
     "repetitive stock loops"
   ],
   "preferred_format": "auto",
-  "shorts_score": 118.25,
+  "shorts_score": 105.78,
   "long_score": 1.43,
   "notes": "Self-learning engine initialized for Quick Shift Creative."
 }
