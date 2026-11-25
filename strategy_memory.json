@@ -1,18 +1,18 @@
 {
-  "updated_at": "2026-11-25T21:58:36.356601+00:00",
+  "updated_at": "2026-11-25T23:46:47.872541+00:00",
   "winning_topics": [
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans #Shorts",
     "How GTA 6 Uses Real Drivers for Perfect Handling #Shorts",
     "GTA 6 Viral Chaos and Career Gambles #Shorts",
     "Jensen Huang Returns: Nvidia Soars 31% #Shorts",
-    "For workplace culture champions, Jensen Huang's return is 'unfathomable' #Shorts"
+    "Nvidia vs Intel: The AI Stock Trap #Shorts"
   ],
   "avoid_patterns": [
     "generic filler intros",
     "repetitive stock loops"
   ],
   "preferred_format": "auto",
-  "shorts_score": 148.5,
+  "shorts_score": 143.27,
   "long_score": 1.62,
   "notes": "Self-learning engine initialized for Quick Shift Creative."
 }
