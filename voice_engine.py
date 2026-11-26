@@ -5,14 +5,13 @@ import random
 import subprocess
 import edge_tts
 
-# Dynamic speed & pitch per scene tone for natural, non-robotic delivery
 TONE_PROSODY = {
-    "hook":       ("+7%", "+2Hz"),
-    "urgent":     ("+9%", "+1Hz"),
-    "excited":    ("+8%", "+3Hz"),
+    "hook":       ("+6%", "+2Hz"),
+    "urgent":     ("+7%", "+1Hz"),
+    "excited":    ("+6%", "+3Hz"),
     "serious":    ("-3%", "-2Hz"),
-    "analytical": ("+2%", "+0Hz"),
-    "calm":       ("-2%", "-1Hz"),
+    "analytical": ("+1%", "+0Hz"),
+    "calm":       ("-3%", "-1Hz"),
 }
 
 MALE_VOICES = ["en-US-AndrewNeural", "en-US-BrianNeural"]
@@ -140,7 +139,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 for j, w_tok in enumerate(ch):
                     tok_upper = w_tok["text"].upper() if is_shorts else w_tok["text"]
                     if j == active_i:
-                        # Bright gold/yellow pop highlight on the exact active word
                         rendered_tokens.append(
                             f"{{\\c&H00D7FF&\\fscx108\\fscy108}}{tok_upper}{{\\c&HFFFFFF&\\fscx100\\fscy100}}"
                         )
@@ -160,9 +158,10 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
     os.makedirs(work_dir, exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
     voice = _pick_voice()
-    breath_pad = 0.14 if is_shorts else 0.26
+    breath_pad = 0.22 if is_shorts else 0.28
+    outro_tail_pad = 1.80 if is_shorts else 2.50
 
-    print(f"[Voice] Active Neural Host: {voice} | Dynamic Tone Prosody + Word-Pop Captions ON")
+    print(f"[Voice] Active Neural Host: {voice} | Smooth Outro Tail: {outro_tail_pad:.1f}s")
 
     scene_audio_info = []
     all_word_events = []
@@ -173,10 +172,11 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
         if not narration:
             continue
 
-        tone = sc.get("tone", "hook" if i == 0 else "analytical").strip().lower()
-        base_rate, base_pitch = TONE_PROSODY.get(tone, ("+2%", "+0Hz"))
-        if is_shorts and tone not in ("hook", "urgent", "excited"):
-            base_rate = "+6%"
+        is_last = (i == len(scenes) - 1)
+        tone = "calm" if is_last else sc.get("tone", "hook" if i == 0 else "analytical").strip().lower()
+        base_rate, base_pitch = TONE_PROSODY.get(tone, ("+1%", "+0Hz"))
+        if is_shorts and not is_last and tone not in ("hook", "urgent", "excited"):
+            base_rate = "+4%"
 
         raw_mp3 = os.path.join(work_dir, f"raw_voice_{i:03d}.mp3")
         clean_mp3 = os.path.join(work_dir, f"voice_{i:03d}.mp3")
@@ -185,10 +185,10 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
             words = asyncio.run(_synthesize_scene(narration, voice, base_rate, base_pitch, raw_mp3))
         except Exception as e:
             print(f"[Voice] Retry fallback voice on scene {i + 1}: {e}")
-            words = asyncio.run(_synthesize_scene(narration, "en-US-AndrewNeural", "+2%", "+0Hz", raw_mp3))
+            words = asyncio.run(_synthesize_scene(narration, "en-US-AndrewNeural", "+1%", "+0Hz", raw_mp3))
 
-        # Standardize sample rate + add natural human breath pause between scenes
-        pad_sec = 0.05 if i == len(scenes) - 1 else breath_pad
+        # Final scene gets a generous breathing tail so music & outro fade out cleanly (zero abrupt cut)
+        pad_sec = outro_tail_pad if is_last else breath_pad
         subprocess.run(
             [
                 "ffmpeg", "-y", "-i", raw_mp3,
@@ -203,7 +203,6 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
 
         dur = _probe_duration(clean_mp3)
 
-        # Fallback word timing if Edge-TTS didn't emit WordBoundary events
         if not words:
             raw_tokens = narration.split()
             speak_dur = max(0.5, dur - pad_sec)
