@@ -15,6 +15,24 @@ except Exception:
 MEMORY_FILE = "strategy_memory.json"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+THUMBNAIL_FONTS = [
+    "Anton",
+    "Lilita One",
+    "Poppins Black",
+    "Bebas Neue",
+    "Oswald",
+    "Bangers",
+]
+
+THUMBNAIL_LAYOUTS = [
+    "mrbeast_bottom_slam",
+    "split_left_editorial",
+    "top_focus_frame",
+    "youtube_clean_pro",
+]
+
+THUMB_EXPERIMENT_TARGET = 50
+
 US_BASELINE_SHORTS_WEEKDAY = {
     8: 1.28, 9: 1.15, 11: 1.18, 12: 1.32, 13: 1.20,
     16: 1.22, 17: 1.36, 18: 1.28, 19: 1.30, 20: 1.40, 21: 1.34, 22: 1.22,
@@ -47,6 +65,15 @@ DEFAULT_MEMORY = {
     "top_hours_long_et": [20, 14],
     "hourly_stats": {"shorts": {}, "long": {}},
     "scheduled_slots": {},
+    "thumbnail_experiments": {
+        "target_videos": THUMB_EXPERIMENT_TARGET,
+        "total_recorded": 0,
+        "winning_font": "Anton",
+        "winning_layout": "mrbeast_bottom_slam",
+        "font_stats": {},
+        "layout_stats": {},
+        "records": {},
+    },
     "last_updated_utc": "",
 }
 
@@ -58,6 +85,12 @@ def load_strategy_memory():
                 data = json.load(f)
             merged = dict(DEFAULT_MEMORY)
             merged.update(data)
+            if "thumbnail_experiments" not in merged or not isinstance(merged["thumbnail_experiments"], dict):
+                merged["thumbnail_experiments"] = dict(DEFAULT_MEMORY["thumbnail_experiments"])
+            else:
+                te = dict(DEFAULT_MEMORY["thumbnail_experiments"])
+                te.update(merged["thumbnail_experiments"])
+                merged["thumbnail_experiments"] = te
             return merged
         except Exception:
             pass
@@ -73,7 +106,6 @@ def save_strategy_memory(mem):
 
 
 def fetch_youtube_autocomplete_keywords(seed_topic, max_results=14):
-    """Fetches real-time high-demand US YouTube Search autocomplete keywords for SEO ranking."""
     clean_seed = re.sub(r"[^a-zA-Z0-9\s]", " ", str(seed_topic or "")).strip()
     words = [w for w in clean_seed.split() if len(w) > 2]
     queries = []
@@ -170,7 +202,6 @@ def _compute_ranked_hours(hourly_bucket, video_format, is_weekend):
 
 
 def _fetch_recent_viewer_comments(youtube_service, video_ids):
-    """Pulls 1-3 real viewer comments from recent videos so AI can shout out the community."""
     comments_out = []
     for vid in video_ids[:5]:
         try:
@@ -194,8 +225,183 @@ def _fetch_recent_viewer_comments(youtube_service, video_ids):
     return comments_out
 
 
+def _update_thumbnail_experiment_scores(mem, live_video_metrics):
+    """Evaluates all recorded thumbnail experiments against live YouTube views & CTR-proxy velocity."""
+    te = mem.get("thumbnail_experiments") or dict(DEFAULT_MEMORY["thumbnail_experiments"])
+    records = te.get("records") or {}
+    if not records:
+        return
+
+    shorts_base = max(10.0, float(mem.get("shorts_score", 50.0)))
+    long_base = max(5.0, float(mem.get("long_score", 15.0)))
+
+    for vid_id, rec in records.items():
+        m = live_video_metrics.get(vid_id)
+        if not m:
+            continue
+        views = m["views"]
+        velocity = m["velocity"]
+        base_avg = shorts_base if rec.get("is_shorts") else long_base
+        # Normalized CTR-proxy score: > 1.0 means thumbnail beat channel average click-traction
+        ctr_proxy = round((views / base_avg) * 0.55 + (velocity / max(1.0, base_avg * 0.12)) * 0.45, 3)
+        rec["views"] = views
+        rec["ctr_proxy"] = ctr_proxy
+
+    font_agg = {}
+    layout_agg = {}
+    for rec in records.values():
+        if rec.get("ctr_proxy") is None:
+            continue
+        fn = rec.get("font", "Anton")
+        ly = rec.get("layout", "mrbeast_bottom_slam")
+        score = float(rec["ctr_proxy"])
+        views = int(rec.get("views", 0))
+
+        fa = font_agg.setdefault(fn, {"count": 0, "score_sum": 0.0, "views_sum": 0})
+        fa["count"] += 1
+        fa["score_sum"] += score
+        fa["views_sum"] += views
+
+        la = layout_agg.setdefault(ly, {"count": 0, "score_sum": 0.0, "views_sum": 0})
+        la["count"] += 1
+        la["score_sum"] += score
+        la["views_sum"] += views
+
+    te["font_stats"] = {
+        k: {
+            "count": v["count"],
+            "avg_ctr_proxy": round(v["score_sum"] / max(1, v["count"]), 3),
+            "avg_views": round(v["views_sum"] / max(1, v["count"]), 1),
+        }
+        for k, v in font_agg.items()
+    }
+    te["layout_stats"] = {
+        k: {
+            "count": v["count"],
+            "avg_ctr_proxy": round(v["score_sum"] / max(1, v["count"]), 3),
+            "avg_views": round(v["views_sum"] / max(1, v["count"]), 1),
+        }
+        for k, v in layout_agg.items()
+    }
+    te["total_recorded"] = len(records)
+
+    if te["font_stats"]:
+        best_f = max(te["font_stats"].items(), key=lambda x: x[1]["avg_ctr_proxy"])[0]
+        te["winning_font"] = best_f
+    if te["layout_stats"]:
+        best_l = max(te["layout_stats"].items(), key=lambda x: x[1]["avg_ctr_proxy"])[0]
+        te["winning_layout"] = best_l
+
+    mem["thumbnail_experiments"] = te
+
+
+def pick_thumbnail_experiment_config(topic_text="", category="tech"):
+    """
+    50-Video Thumbnail Experiment & Self-Learning Picker:
+    - Videos 1-50: Systematically rotates all 6 fonts & 4 layouts so every option gets fair samples,
+      while blending in early CTR-proxy winners once all options have >= 2 tests.
+    - After 50 Videos: Automatically locks onto the #1 winning font & layout 80% of the time,
+      with 20% smart exploration to stay ahead of evolving trends.
+    """
+    mem = load_strategy_memory()
+    te = mem.get("thumbnail_experiments") or {}
+    records = te.get("records") or {}
+    total_done = len(records)
+    target = int(te.get("target_videos", THUMB_EXPERIMENT_TARGET))
+
+    # Count how many times each font & layout has been used in the 50-video ledger
+    font_counts = {f: 0 for f in THUMBNAIL_FONTS}
+    layout_counts = {l: 0 for l in THUMBNAIL_LAYOUTS}
+    for rec in records.values():
+        fn = rec.get("font")
+        ly = rec.get("layout")
+        if fn in font_counts:
+            font_counts[fn] += 1
+        if ly in layout_counts:
+            layout_counts[ly] += 1
+
+    font_stats = te.get("font_stats") or {}
+    layout_stats = te.get("layout_stats") or {}
+
+    if total_done < target:
+        phase = f"50-Video Experiment ({total_done + 1}/{target})"
+        min_f = min(font_counts.values())
+        min_l = min(layout_counts.values())
+        # Ensure balanced testing first; once each has >= 3 tests, lean 40% toward current leader
+        if min_f >= 3 and font_stats and random.random() < 0.40:
+            chosen_font = te.get("winning_font", "Anton")
+        else:
+            least_fonts = [f for f, c in font_counts.items() if c == min_f]
+            chosen_font = random.choice(least_fonts)
+
+        if min_l >= 4 and layout_stats and random.random() < 0.40:
+            chosen_layout = te.get("winning_layout", "mrbeast_bottom_slam")
+        else:
+            least_layouts = [l for l, c in layout_counts.items() if c == min_l]
+            chosen_layout = random.choice(least_layouts)
+    else:
+        phase = f"Mastery Auto-Winner ({total_done} tested)"
+        if random.random() < 0.80:
+            chosen_font = te.get("winning_font", "Anton")
+            chosen_layout = te.get("winning_layout", "mrbeast_bottom_slam")
+        else:
+            chosen_font = random.choice(THUMBNAIL_FONTS)
+            chosen_layout = random.choice(THUMBNAIL_LAYOUTS)
+
+    # Topic-matched accent color psychology (zero clickbait — matches story emotion)
+    low = f"{topic_text} {category}".lower()
+    if any(w in low for w in ("crash", "scandal", "drop", "warning", "ban", "hack", "loss", "crisis", "risk", "exposed")):
+        accent = "red"
+    elif any(w in low for w in ("stock", "billion", "million", "profit", "rally", "surge", "money", "earnings", "portfolio", "business")):
+        accent = "green"
+    elif any(w in low for w in ("ai", "gpu", "nvidia", "chip", "robot", "gaming", "playstation", "xbox", "quantum")):
+        accent = "cyan" if random.random() < 0.45 else "gold"
+    else:
+        accent = "gold"
+
+    cfg = {
+        "font": chosen_font,
+        "layout": chosen_layout,
+        "accent": accent,
+        "phase": phase,
+    }
+    print(f"[ThumbAI] {phase} -> Font: {chosen_font} | Layout: {chosen_layout} | Accent: {accent}")
+    return cfg
+
+
+def record_thumbnail_experiment(video_id, thumb_cfg, topic="", is_shorts=False):
+    """Logs the uploaded video's thumbnail font, layout & accent in the 50-video learning ledger."""
+    if not video_id or not thumb_cfg:
+        return
+    mem = load_strategy_memory()
+    te = mem.get("thumbnail_experiments") or dict(DEFAULT_MEMORY["thumbnail_experiments"])
+    records = te.get("records") or {}
+
+    records[video_id] = {
+        "font": thumb_cfg.get("font", "Anton"),
+        "layout": thumb_cfg.get("layout", "mrbeast_bottom_slam"),
+        "accent": thumb_cfg.get("accent", "gold"),
+        "topic": str(topic or "")[:70],
+        "is_shorts": bool(is_shorts),
+        "uploaded_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "views": 0,
+        "ctr_proxy": None,
+    }
+
+    # Keep the latest 100 experiment records to keep JSON compact
+    if len(records) > 100:
+        sorted_keys = sorted(records.keys(), key=lambda k: records[k].get("uploaded_utc", ""))
+        for old_k in sorted_keys[:-100]:
+            records.pop(old_k, None)
+
+    te["records"] = records
+    te["total_recorded"] = len(records)
+    mem["thumbnail_experiments"] = te
+    save_strategy_memory(mem)
+    print(f"[ThumbAI] Recorded experiment #{te['total_recorded']} for video {video_id}")
+
+
 def update_strategy_from_youtube(youtube_service=None):
-    """100x Self-Learning Brain: learns formats, title hooks, SEO keywords, viewer comments & US Golden Hours."""
     mem = load_strategy_memory()
     if youtube_service is None:
         return mem
@@ -227,6 +433,7 @@ def update_strategy_from_youtube(youtube_service=None):
         top_performing = []
         live_scheduled_slots = {}
         public_vid_ids = []
+        live_video_metrics = {}
 
         for v in v_resp.get("items", []):
             vid_id = v.get("id", "")
@@ -267,6 +474,12 @@ def update_strategy_from_youtube(youtube_service=None):
             velocity = (views / (age_hours ** 0.65)) * eng_boost
             reach_score = (views * 0.55 + velocity * 12.0) * eng_boost
 
+            live_video_metrics[vid_id] = {
+                "views": views,
+                "velocity": velocity,
+                "reach_score": reach_score,
+            }
+
             if v_fmt == "shorts":
                 shorts_views.append(views)
             else:
@@ -298,6 +511,9 @@ def update_strategy_from_youtube(youtube_service=None):
             mem["shorts_score"] = round(sum(shorts_views) / len(shorts_views), 2)
         if long_views:
             mem["long_score"] = round(sum(long_views) / len(long_views), 2)
+
+        # Score all 50-video thumbnail font & layout experiments against live YouTube performance
+        _update_thumbnail_experiment_scores(mem, live_video_metrics)
 
         hourly_summary = {"shorts": {}, "long": {}}
         for fmt in ("shorts", "long"):
@@ -349,10 +565,11 @@ def update_strategy_from_youtube(youtube_service=None):
         mem["last_updated_utc"] = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         save_strategy_memory(mem)
+        te = mem.get("thumbnail_experiments") or {}
         print(
             f"[LearningEngine] 100x Sync -> Shorts avg: {mem['shorts_score']} | Long avg: {mem['long_score']} | "
-            f"Golden ET: Shorts={mem['golden_hour_shorts_et']:02d}:00, Long={mem['golden_hour_long_et']:02d}:00 | "
-            f"Top Hooks: {', '.join(mem.get('winning_title_patterns', []))}"
+            f"Golden ET: S={mem['golden_hour_shorts_et']:02d}:00, L={mem['golden_hour_long_et']:02d}:00 | "
+            f"ThumbAI Leader ({te.get('total_recorded', 0)}/50): {te.get('winning_font')} + {te.get('winning_layout')}"
         )
     except Exception as e:
         print(f"[LearningEngine] Stats sync skipped: {e}")
@@ -361,7 +578,6 @@ def update_strategy_from_youtube(youtube_service=None):
 
 
 def _gemini_seo_rewrite(gemini_api_key, old_title, old_desc, seo_keywords, is_shorts, winning_patterns):
-    """Calls Gemini to craft a higher-CTR, search-optimized Title, Description & Tags within 48h window."""
     if not gemini_api_key:
         return None
 
@@ -416,11 +632,6 @@ Return ONLY valid JSON:
 
 
 def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_run=2):
-    """
-    Auto-scans public videos published 6h to 48h ago.
-    If views lag behind channel benchmark, researches live YouTube Autocomplete keywords
-    and updates Title + SEO Description + Tags once to revive search & feed ranking.
-    """
     if not youtube_service or not gemini_api_key:
         return
 
@@ -523,7 +734,7 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
                     f"'{old_title[:45]}' => '{new_title[:55]}'"
                 )
             except Exception as upd_e:
-                print(f"[SEO-SelfHeal 48h] Update skipped for {vid_id} (check OAuth scope): {upd_e}")
+                print(f"[SEO-SelfHeal 48h] Update skipped for {vid_id}: {upd_e}")
                 break
 
         if repaired > 0:
