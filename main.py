@@ -9,7 +9,12 @@ from media_fetcher import fetch_stock_image
 from thumbnail_maker import create_thumbnail
 from video_builder import build_final_video
 from youtube_uploader import get_youtube_service, upload_video_with_thumbnail
-from learning_engine import load_strategy_memory, update_strategy_from_youtube
+from learning_engine import (
+    load_strategy_memory,
+    pick_smart_publish_time,
+    record_scheduled_slot,
+    update_strategy_from_youtube,
+)
 
 
 def _resolve_video_format():
@@ -74,6 +79,26 @@ def run_pipeline():
         chosen_topic=blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"]),
     )
 
+    privacy = os.getenv("PRIVACY_STATUS", "unlisted").strip().lower()
+    lead_mins = int(os.getenv("SCHEDULE_LEAD_MINUTES", "30") or "30")
+    publish_at_iso = None
+    sched_hour_et = None
+    sched_date_key = None
+
+    if privacy == "public":
+        publish_at_iso, sched_summary, sched_hour_et, sched_date_key = pick_smart_publish_time(
+            video_format=active_format,
+            min_lead_minutes=max(30, lead_mins),
+        )
+        print(f"[SmartSchedule] {sched_summary}")
+    else:
+        # Preview what the AI WOULD have picked even on manual unlisted test runs
+        _, preview_summary, _, _ = pick_smart_publish_time(
+            video_format=active_format,
+            min_lead_minutes=30,
+        )
+        print(f"[SmartSchedule Preview (Unlisted Run)] Next optimal US slot -> {preview_summary}")
+
     video_id = upload_video_with_thumbnail(
         video_path=final_video_path,
         thumbnail_path=thumbnail_path,
@@ -81,7 +106,11 @@ def run_pipeline():
         description=blueprint["description"],
         tags=blueprint.get("tags", []),
         category=blueprint.get("category", "tech"),
+        publish_at_iso=publish_at_iso,
     )
+
+    if publish_at_iso and sched_hour_et is not None and sched_date_key:
+        record_scheduled_slot(active_format, sched_hour_et, sched_date_key, publish_at_iso)
 
     save_history(
         topic=blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"]),
@@ -91,7 +120,7 @@ def run_pipeline():
     )
 
     print("=" * 65)
-    print(f"DONE! Live on {CHANNEL_NAME}: https://www.youtube.com/watch?v={video_id}")
+    print(f"DONE! Live/Scheduled on {CHANNEL_NAME}: https://www.youtube.com/watch?v={video_id}")
     print("=" * 65)
 
 
