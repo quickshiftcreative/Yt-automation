@@ -92,3 +92,26 @@ def upload_video_with_thumbnail(
             print(f"[YouTube] Thumbnail upload warning: {e}")
 
     return video_id
+
+
+def post_engagement_comment(youtube, video_id, comment_text):
+    """Posts an automatic debate/poll comment right after upload to spark viewer replies."""
+    if not youtube or not video_id or not comment_text:
+        return
+    try:
+        youtube.commentThreads().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {
+                            "textOriginal": str(comment_text).strip()[:400],
+                        }
+                    },
+                }
+            },
+        ).execute()
+        print(f"[CommentBot] Posted engagement comment on {video_id}!")
+    except Exception as e:
+        print(f"[CommentBot] Skipped (requires youtube.force-ssl scope & non-private status): {e}")
