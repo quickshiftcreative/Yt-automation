@@ -1,18 +1,21 @@
 import os
 import shutil
 import traceback
+from PIL import Image
 from config import PROJECT_NAME, CHANNEL_NAME, WORK_DIR, OUTPUT_DIR, CUSTOM_TOPIC, GEMINI_API_KEY
 from trending_engine import fetch_trending_topics, save_history
 from script_ai import generate_video_blueprint
 from voice_engine import generate_scene_voices_and_srt
-from media_fetcher import fetch_stock_image
+from media_fetcher import fetch_article_image, fetch_stock_image
 from thumbnail_maker import create_thumbnail
 from video_builder import build_final_video
 from youtube_uploader import get_youtube_service, post_engagement_comment, upload_video_with_thumbnail
 from learning_engine import (
     load_strategy_memory,
     pick_smart_publish_time,
+    pick_thumbnail_experiment_config,
     record_scheduled_slot,
+    record_thumbnail_experiment,
     run_48h_seo_self_healing,
     update_strategy_from_youtube,
 )
@@ -31,7 +34,6 @@ def _resolve_video_format():
 
 
 def _build_chapters_text(scene_audio_info):
-    """Builds clickable YouTube timestamps for Long-form videos to boost Google/YouTube Search ranking."""
     if len(scene_audio_info) < 10:
         return ""
     step = max(4, len(scene_audio_info) // 6)
@@ -50,6 +52,25 @@ def _build_chapters_text(scene_audio_info):
     return "\n".join(lines) + "\n"
 
 
+def _fetch_real_topic_thumbnail_bg(chosen_topic, fallback_query, work_dir):
+    """Prioritizes a sharp real press/topic image from the video's actual story before stock fallback."""
+    real_path = os.path.join(work_dir, "thumb_real_topic.jpg")
+    if chosen_topic:
+        art_img = fetch_article_image(chosen_topic, real_path)
+        if art_img and os.path.exists(art_img):
+            try:
+                with Image.open(art_img) as im:
+                    if im.width >= 640 and im.height >= 360:
+                        print(f"[Thumbnail] Using REAL topic press image ({im.width}x{im.height})")
+                        return art_img
+            except Exception:
+                pass
+
+    stock_path = os.path.join(work_dir, "thumb_bg.jpg")
+    print(f"[Thumbnail] Falling back to HD topic editorial photo for '{fallback_query}'")
+    return fetch_stock_image(fallback_query or "technology", stock_path, orientation="landscape")
+
+
 def run_pipeline():
     print("=" * 65)
     print(f"Starting {PROJECT_NAME} | Channel: {CHANNEL_NAME}")
@@ -58,10 +79,7 @@ def run_pipeline():
     youtube = get_youtube_service()
     print("[Pipeline] YouTube OAuth verified!")
 
-    # 1. 100x Self-Learning sync (timing, views, hook styles, keywords & viewer comments)
     update_strategy_from_youtube(youtube_service=youtube)
-
-    # 2. 48-Hour SEO Auto-Healing for any recent underperforming videos
     run_48h_seo_self_healing(youtube_service=youtube, gemini_api_key=GEMINI_API_KEY)
 
     active_format = _resolve_video_format()
@@ -83,7 +101,6 @@ def run_pipeline():
     )
     print(f"[Pipeline] Total voiceover duration: {total_duration:.2f}s")
 
-    # Append clickable Chapters to Long videos & ensure SEO hashtags exist
     final_desc = str(blueprint.get("description", "")).strip()
     if active_format != "shorts":
         chapters_txt = _build_chapters_text(scene_audio_info)
@@ -93,8 +110,18 @@ def run_pipeline():
         default_tags = "#Shorts #TechNews #AINews #QuickShiftCreative" if active_format == "shorts" else "#TechNews #AINews #Markets #QuickShiftCreative"
         final_desc = f"{final_desc}\n\n{default_tags}"
 
-    thumb_bg_path = os.path.join(WORK_DIR, "thumb_bg.jpg")
-    fetched_bg = fetch_stock_image(blueprint.get("thumbnail_query", "technology"), thumb_bg_path)
+    chosen_topic = blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"])
+
+    # 50-Video Thumbnail Font + Layout Experiment Picker + Real Topic Image Polish
+    thumb_cfg = pick_thumbnail_experiment_config(
+        topic_text=f"{chosen_topic} {blueprint.get('title', '')}",
+        category=blueprint.get("category", "tech"),
+    )
+    fetched_bg = _fetch_real_topic_thumbnail_bg(
+        chosen_topic=chosen_topic,
+        fallback_query=blueprint.get("thumbnail_query", "technology"),
+        work_dir=WORK_DIR,
+    )
     thumbnail_path = os.path.join(OUTPUT_DIR, "thumbnail.jpg")
     create_thumbnail(
         bg_image_path=fetched_bg,
@@ -102,6 +129,9 @@ def run_pipeline():
         subtext=blueprint.get("thumbnail_subtext", ""),
         output_path=thumbnail_path,
         bulletin_badge=blueprint.get("bulletin_badge", "TECH BULLETIN"),
+        font_name=thumb_cfg["font"],
+        layout=thumb_cfg["layout"],
+        accent=thumb_cfg["accent"],
     )
 
     final_video_path = os.path.join(OUTPUT_DIR, "final_video.mp4")
@@ -111,7 +141,7 @@ def run_pipeline():
         WORK_DIR,
         final_video_path,
         music_direction=blueprint.get("music_direction", {}),
-        chosen_topic=blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"]),
+        chosen_topic=chosen_topic,
         debate_card=blueprint.get("debate_card", {}),
     )
 
@@ -144,7 +174,15 @@ def run_pipeline():
         publish_at_iso=publish_at_iso,
     )
 
-    # Auto-post debate question comment (works immediately on public/unlisted videos)
+    # Record this video's font/layout into the 50-video CTR experiment ledger (only for public/scheduled runs)
+    if privacy == "public":
+        record_thumbnail_experiment(
+            video_id=video_id,
+            thumb_cfg=thumb_cfg,
+            topic=chosen_topic,
+            is_shorts=(active_format == "shorts"),
+        )
+
     if privacy != "private" and not publish_at_iso:
         post_engagement_comment(youtube, video_id, blueprint.get("pinned_comment", ""))
 
@@ -152,7 +190,7 @@ def run_pipeline():
         record_scheduled_slot(active_format, sched_hour_et, sched_date_key, publish_at_iso)
 
     save_history(
-        topic=blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"]),
+        topic=chosen_topic,
         title=blueprint["title"],
         video_id=video_id,
         category=blueprint.get("category", "tech"),
