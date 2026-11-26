@@ -34,6 +34,7 @@ def upload_video_with_thumbnail(
     description,
     tags=None,
     category="tech",
+    publish_at_iso=None,
 ):
     youtube = get_youtube_service()
     privacy = os.getenv("PRIVACY_STATUS", "unlisted").strip().lower()
@@ -46,12 +47,17 @@ def upload_video_with_thumbnail(
         "selfDeclaredMadeForKids": False,
     }
 
-    if privacy == "public" and lead_mins > 0:
-        publish_dt = datetime.now(timezone.utc) + timedelta(minutes=lead_mins)
-        publish_iso = publish_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        status_body["privacyStatus"] = "private"
-        status_body["publishAt"] = publish_iso
-        print(f"[YouTube] Auto-scheduling video for {publish_iso} (+{lead_mins} min lead time)")
+    if privacy == "public":
+        if publish_at_iso:
+            status_body["privacyStatus"] = "private"
+            status_body["publishAt"] = publish_at_iso
+            print(f"[YouTube] Smart AI Schedule Locked -> {publish_at_iso}")
+        elif lead_mins > 0:
+            publish_dt = datetime.now(timezone.utc) + timedelta(minutes=lead_mins)
+            fallback_iso = publish_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            status_body["privacyStatus"] = "private"
+            status_body["publishAt"] = fallback_iso
+            print(f"[YouTube] Fallback Schedule -> {fallback_iso} (+{lead_mins} min)")
 
     clean_tags = [str(t).strip() for t in (tags or []) if str(t).strip()][:25]
     cat_id = CATEGORY_MAP.get(str(category).lower(), "28")
