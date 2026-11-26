@@ -1,18 +1,145 @@
 {
-  "updated_at": "2026-11-26T13:07:26.249931+00:00",
+  "shorts_score": 157.43,
+  "long_score": 1.78,
   "winning_topics": [
-    "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans #Shorts",
-    "How GTA 6 Uses Real Drivers for Perfect Handling #Shorts",
-    "GTA 6 Viral Chaos and Career Gambles #Shorts",
-    "California Sues OpenAI Over Safety #Shorts",
-    "Jensen Huang Returns: Nvidia Soars 31% #Shorts"
+    "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
+    "California Sues OpenAI Over Safety",
+    "How GTA 6 Uses Real Drivers for Perfect Handling",
+    "GTA 6 Viral Chaos and Career Gambles",
+    "Nvidia vs Intel: The AI Stock Trap"
   ],
   "avoid_patterns": [
     "generic filler intros",
     "repetitive stock loops"
   ],
+  "winning_title_patterns": [
+    "specific_number",
+    "direct_statement",
+    "curiosity_contrast"
+  ],
+  "winning_keywords": [
+    "gta 6 jason",
+    "gta 6 protagonist",
+    "gta vi",
+    "gaming trends",
+    "grand theft auto 6",
+    "california lawsuit",
+    "rockstargames",
+    "techtrends",
+    "gta6",
+    "gamingnews"
+  ],
+  "recent_viewer_comments": [],
+  "healed_video_ids": [],
+  "golden_hour_shorts_et": 19,
+  "golden_hour_long_et": 20,
+  "top_hours_shorts_et": [
+    19,
+    20,
+    0,
+    21,
+    18,
+    16
+  ],
+  "top_hours_long_et": [
+    20,
+    19,
+    21,
+    14
+  ],
+  "hourly_stats": {
+    "shorts": {
+      "8": {
+        "count": 2,
+        "avg_views": 47.5,
+        "avg_reach": 91.37
+      },
+      "23": {
+        "count": 1,
+        "avg_views": 24.0,
+        "avg_reach": 140.51
+      },
+      "19": {
+        "count": 3,
+        "avg_views": 528.0,
+        "avg_reach": 953.17
+      },
+      "17": {
+        "count": 1,
+        "avg_views": 2.0,
+        "avg_reach": 9.6
+      },
+      "9": {
+        "count": 2,
+        "avg_views": 52.5,
+        "avg_reach": 106.08
+      },
+      "0": {
+        "count": 1,
+        "avg_views": 333.0,
+        "avg_reach": 628.0
+      },
+      "10": {
+        "count": 1,
+        "avg_views": 41.0,
+        "avg_reach": 73.9
+      },
+      "15": {
+        "count": 1,
+        "avg_views": 6.0,
+        "avg_reach": 13.44
+      },
+      "14": {
+        "count": 1,
+        "avg_views": 3.0,
+        "avg_reach": 6.7
+      },
+      "12": {
+        "count": 1,
+        "avg_views": 11.0,
+        "avg_reach": 23.16
+      }
+    },
+    "long": {
+      "4": {
+        "count": 3,
+        "avg_views": 2.0,
+        "avg_reach": 9.7
+      },
+      "21": {
+        "count": 2,
+        "avg_views": 1.5,
+        "avg_reach": 8.25
+      },
+      "22": {
+        "count": 1,
+        "avg_views": 2.0,
+        "avg_reach": 6.72
+      },
+      "6": {
+        "count": 1,
+        "avg_views": 1.0,
+        "avg_reach": 1.44
+      },
+      "17": {
+        "count": 2,
+        "avg_views": 2.0,
+        "avg_reach": 4.51
+      }
+    }
+  },
+  "scheduled_slots": {},
+  "thumbnail_experiments": {
+    "target_videos": 50,
+    "total_recorded": 0,
+    "winning_font": "Anton",
+    "winning_layout": "mrbeast_bottom_slam",
+    "font_stats": {},
+    "layout_stats": {},
+    "records": {}
+  },
+  "last_updated_utc": "2026-11-26T17:40:00Z",
+  "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
-  "shorts_score": 157.54,
-  "long_score": 1.9,
   "notes": "Self-learning engine initialized for Quick Shift Creative."
 }
