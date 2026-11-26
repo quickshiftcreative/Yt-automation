@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import os
 import random
+import re
 import subprocess
 import edge_tts
 
@@ -17,14 +18,49 @@ TONE_PROSODY = {
 MALE_VOICES = ["en-US-AndrewNeural", "en-US-BrianNeural"]
 FEMALE_VOICES = ["en-US-AvaNeural", "en-US-EmmaNeural"]
 
+# Natural US spoken normalization so Edge-TTS never stumbles on stock tickers or finance shorthand
+SPOKEN_REPLACEMENTS = [
+    (r"\$(\d+(?:\.\d+)?)\s*[Tt]\b", r"$\1 trillion"),
+    (r"\$(\d+(?:\.\d+)?)\s*[Bb]\b", r"$\1 billion"),
+    (r"\$(\d+(?:\.\d+)?)\s*[Mm]\b", r"$\1 million"),
+    (r"\b(\d+(?:\.\d+)?)\s*[xX]\b", r"\1 times"),
+    (r"\bNVDA\b", "Nvidia"),
+    (r"\bAAPL\b", "Apple"),
+    (r"\bMSFT\b", "Microsoft"),
+    (r"\bTSLA\b", "Tesla"),
+    (r"\bGOOGL\b", "Google"),
+    (r"\bAMZN\b", "Amazon"),
+    (r"\bINTC\b", "Intel"),
+    (r"\bYoY\b", "year-over-year"),
+    (r"\bQoQ\b", "quarter-over-quarter"),
+    (r"\bQ1\b", "first quarter"),
+    (r"\bQ2\b", "second quarter"),
+    (r"\bQ3\b", "third quarter"),
+    (r"\bQ4\b", "fourth quarter"),
+]
 
-def _pick_voice():
+
+def _normalize_for_natural_speech(text):
+    out = str(text or "")
+    for pat, repl in SPOKEN_REPLACEMENTS:
+        out = re.sub(pat, repl, out)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def _pick_host_pair():
     style = os.getenv("VOICE_STYLE", "auto").strip().lower()
     if style == "male_us":
-        return random.choice(MALE_VOICES)
-    if style == "female_us":
-        return random.choice(FEMALE_VOICES)
-    return random.choice(MALE_VOICES + FEMALE_VOICES)
+        main_v = random.choice(MALE_VOICES)
+        co_v = random.choice(FEMALE_VOICES)
+    elif style == "female_us":
+        main_v = random.choice(FEMALE_VOICES)
+        co_v = random.choice(MALE_VOICES)
+    else:
+        if random.random() < 0.55:
+            main_v, co_v = random.choice(MALE_VOICES), random.choice(FEMALE_VOICES)
+        else:
+            main_v, co_v = random.choice(FEMALE_VOICES), random.choice(MALE_VOICES)
+    return main_v, co_v
 
 
 def _probe_duration(media_path):
@@ -157,22 +193,30 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
     os.makedirs(work_dir, exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
-    voice = _pick_voice()
+    main_voice, cohost_voice = _pick_host_pair()
     breath_pad = 0.22 if is_shorts else 0.28
     outro_tail_pad = 1.80 if is_shorts else 2.50
 
-    print(f"[Voice] Active Neural Host: {voice} | Smooth Outro Tail: {outro_tail_pad:.1f}s")
+    print(
+        f"[Voice] Main Host: {main_voice} | Co-Host Analyst: {cohost_voice} | "
+        f"Natural Speech Normalization + Outro Tail ({outro_tail_pad:.1f}s) ON"
+    )
 
     scene_audio_info = []
     all_word_events = []
     timeline_cursor = 0.0
 
     for i, sc in enumerate(scenes):
-        narration = sc.get("narration", "").strip()
-        if not narration:
+        raw_narration = sc.get("narration", "").strip()
+        if not raw_narration:
             continue
 
+        spoken_text = _normalize_for_natural_speech(raw_narration)
         is_last = (i == len(scenes) - 1)
+        itype = str(sc.get("interactive_type", "none")).strip().lower()
+        speaker = str(sc.get("speaker", "main")).strip().lower()
+        active_voice = cohost_voice if (not is_shorts and speaker == "cohost" and not is_last) else main_voice
+
         tone = "calm" if is_last else sc.get("tone", "hook" if i == 0 else "analytical").strip().lower()
         base_rate, base_pitch = TONE_PROSODY.get(tone, ("+1%", "+0Hz"))
         if is_shorts and not is_last and tone not in ("hook", "urgent", "excited"):
@@ -182,13 +226,19 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
         clean_mp3 = os.path.join(work_dir, f"voice_{i:03d}.mp3")
 
         try:
-            words = asyncio.run(_synthesize_scene(narration, voice, base_rate, base_pitch, raw_mp3))
+            words = asyncio.run(_synthesize_scene(spoken_text, active_voice, base_rate, base_pitch, raw_mp3))
         except Exception as e:
             print(f"[Voice] Retry fallback voice on scene {i + 1}: {e}")
-            words = asyncio.run(_synthesize_scene(narration, "en-US-AndrewNeural", "+1%", "+0Hz", raw_mp3))
+            words = asyncio.run(_synthesize_scene(spoken_text, "en-US-AndrewNeural", "+1%", "+0Hz", raw_mp3))
 
-        # Final scene gets a generous breathing tail so music & outro fade out cleanly (zero abrupt cut)
-        pad_sec = outro_tail_pad if is_last else breath_pad
+        # Add natural breath pause, 1.8s interactive countdown suspense pause, or smooth outro tail
+        if is_last:
+            pad_sec = outro_tail_pad
+        elif itype == "countdown":
+            pad_sec = 1.80
+        else:
+            pad_sec = breath_pad
+
         subprocess.run(
             [
                 "ffmpeg", "-y", "-i", raw_mp3,
@@ -204,7 +254,7 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
         dur = _probe_duration(clean_mp3)
 
         if not words:
-            raw_tokens = narration.split()
+            raw_tokens = spoken_text.split()
             speak_dur = max(0.5, dur - pad_sec)
             step = speak_dur / max(1, len(raw_tokens))
             words = [
@@ -223,7 +273,8 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
         ]
         all_word_events.append(shifted_words)
 
-        print(f"[Voice] Scene {i + 1}/{len(scenes)} [{tone} | {base_rate}, {base_pitch}] -> {dur:.2f}s")
+        spk_lbl = "COHOST" if active_voice == cohost_voice else "HOST"
+        print(f"[Voice] Scene {i + 1}/{len(scenes)} [{spk_lbl} | {tone} | {itype}] -> {dur:.2f}s")
 
         scene_audio_info.append({
             "index": i,
@@ -231,9 +282,12 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
             "duration": dur,
             "start_time": timeline_cursor,
             "end_time": timeline_cursor + dur,
-            "narration": narration,
+            "countdown_start": (timeline_cursor + max(0.3, dur - pad_sec)) if itype == "countdown" else None,
+            "narration": raw_narration,
             "visual_query": sc.get("visual_query", "technology"),
             "tone": tone,
+            "speaker": speaker,
+            "interactive_type": itype,
             "highlight_text": sc.get("highlight_text", ""),
         })
         timeline_cursor += dur
