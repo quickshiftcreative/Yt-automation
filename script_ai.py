@@ -1,6 +1,7 @@
 import glob
 import json
 import os
+import random
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -34,6 +35,18 @@ MODE_RSS_FEEDS = {
         "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
     ],
 }
+
+SHORTS_CASUAL_OUTROS = [
+    f"If you enjoyed this quick breakdown, hit like, share it with a friend, and subscribe to {CHANNEL_NAME}. Thank you for watching.",
+    f"What is your take on this? Drop a quick like, share this video, and subscribe to {CHANNEL_NAME} for more. Thank you for watching.",
+    f"Stay ahead of the next big shift. Tap like, share this with someone who needs to see it, and subscribe to {CHANNEL_NAME}. Thank you for watching.",
+]
+
+LONG_CASUAL_OUTROS = [
+    f"If this video gave you a clearer picture of what is really happening, go ahead and hit like, share it with a friend, and subscribe to {CHANNEL_NAME} so you never miss the next deep dive. Thank you for watching.",
+    f"I would love to hear your side in the comments below. If you found this breakdown useful, please like, share, and subscribe to {CHANNEL_NAME} for daily updates. Thank you for watching.",
+    f"That wraps up today's breakdown. If you liked hanging out with us, drop a like, share this episode, and hit subscribe on {CHANNEL_NAME}. Thank you for watching.",
+]
 
 
 def _list_local_music_tracks():
@@ -71,7 +84,6 @@ def _fetch_extra_mode_headlines(mode):
 
 
 def _discover_gemini_models():
-    """Discovers available Flash, Pro, and Gemma-3 models across separate backend pools."""
     available = set()
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
@@ -117,6 +129,37 @@ def _clean_narration(text):
     return text
 
 
+def _ensure_casual_outro(scenes, is_shorts):
+    """Guarantees every Long video and Short ends smoothly with like, share, subscribe & thank you for watching."""
+    if not scenes:
+        return scenes
+
+    last = scenes[-1]
+    low = last["narration"].lower()
+    has_cta = ("subscribe" in low and "like" in low and "share" in low)
+    has_thanks = ("thank you for watching" in low or "thanks for watching" in low)
+
+    if has_cta and has_thanks:
+        last["tone"] = "calm"
+        return scenes
+
+    outro_line = random.choice(SHORTS_CASUAL_OUTROS if is_shorts else LONG_CASUAL_OUTROS)
+    if has_cta and not has_thanks:
+        last["narration"] = last["narration"].rstrip(".!? ") + ". Thank you for watching."
+        last["tone"] = "calm"
+    elif is_shorts and len(scenes) >= 6:
+        last["narration"] = last["narration"].rstrip(".!? ") + ". " + outro_line
+        last["tone"] = "calm"
+    else:
+        scenes.append({
+            "narration": outro_line,
+            "visual_query": "modern dark minimalist studio background",
+            "tone": "calm",
+            "highlight_text": "Like, Share & Subscribe",
+        })
+    return scenes
+
+
 def _build_mode_instructions(mode, is_shorts):
     if mode == "trending_viral":
         role_desc = (
@@ -126,8 +169,8 @@ def _build_mode_instructions(mode, is_shorts):
         if is_shorts:
             structure = """
    - Scene 1 (tone: hook): Immediate 3-second conflict hook naming what is blowing up and why it matters.
-   - Scenes 2-4 (tones: excited / urgent / serious): Key details, real crowd reaction, and the unexpected twist.
-   - Scene 5 (tone: calm): Sharp verdict + viewer question + Quick Shift Creative CTA."""
+   - Scenes 2-5 (tones: excited / urgent / analytical / serious): Key details, real crowd reaction, deeper context, and the unexpected twist.
+   - Scene 6 (tone: calm): Crisp wrap-up + casual ask to like, share, and subscribe + end with "Thank you for watching." """
         else:
             structure = """
    Structure the 36 scenes around the #1 viral/trending topic exploding right now:
@@ -136,7 +179,7 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 11-18 (Internet & Crowd Reaction): Real perspectives, debates, and standout moments.
    - Scenes 19-26 (Why It Hit So Hard): Psychological, cultural, or market reasons behind the hype.
    - Scenes 27-33 (Where It Goes Next): Will it fade in a week or reshape the space?
-   - Scenes 34-36 (Closing Take): Honest wrap-up, comment question, and Quick Shift Creative subscribe cue."""
+   - Scenes 34-36 (Warm Outro): Honest wrap-up, comment question, casual ask to like, share, and subscribe, ending clearly with "Thank you for watching." """
         return role_desc, structure
 
     if mode == "deep_dive_evergreen":
@@ -147,8 +190,8 @@ def _build_mode_instructions(mode, is_shorts):
         if is_shorts:
             structure = """
    - Scene 1 (tone: hook): High-curiosity money/strategy hook.
-   - Scenes 2-4 (tones: analytical / serious / excited): Clear breakdown of how it works and the hidden catch.
-   - Scene 5 (tone: calm): Strong takeaway + Quick Shift Creative subscribe cue."""
+   - Scenes 2-5 (tones: analytical / serious / excited / urgent): Clear breakdown of how it works, key numbers, and the hidden catch.
+   - Scene 6 (tone: calm): Memorable takeaway + casual ask to like, share, and subscribe + end with "Thank you for watching." """
         else:
             structure = """
    Structure the 36 scenes for maximum watch time, US RPM, and subscriber conversion:
@@ -157,7 +200,7 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 11-18 (The Numbers & Leverage): Break down margins, incentives, market forces, or key comparisons.
    - Scenes 19-26 (Hidden Bottlenecks & Competition): What most people overlook and how rivals respond.
    - Scenes 27-33 (Future Outlook): Realistic scenarios and what to watch next.
-   - Scenes 34-36 (Final Takeaway): Crisp summary, comment prompt, and Quick Shift Creative subscribe cue."""
+   - Scenes 34-36 (Warm Outro): Crisp summary, comment prompt, casual ask to like, share, and subscribe, ending clearly with "Thank you for watching." """
         return role_desc, structure
 
     role_desc = (
@@ -167,8 +210,8 @@ def _build_mode_instructions(mode, is_shorts):
     if is_shorts:
         structure = """
    - Scene 1 (tone: hook): Fast breaking hook across Gaming, Tech, AI, or Market/Business news.
-   - Scenes 2-4 (tones: urgent / analytical / serious): Key numbers, market reaction, and real-world impact.
-   - Scene 5 (tone: calm): Bottom-line takeaway + Quick Shift Creative CTA."""
+   - Scenes 2-5 (tones: urgent / analytical / serious / excited): Key numbers, market reaction, real-world impact, and what happens next.
+   - Scene 6 (tone: calm): Bottom-line takeaway + casual ask to like, share, and subscribe + end with "Thank you for watching." """
     else:
         structure = """
    Structure the 36 scenes as a crisp multi-segment briefing covering Gaming, Tech, AI, and Business/Market news:
@@ -177,12 +220,11 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 12-19 (Gaming Segment): Major game, studio, or industry updates and why players care.
    - Scenes 20-27 (Market & Business Segment): Stock/index moves, earnings, and business strategy.
    - Scenes 28-33 (Cross-Sector Connections): How tech, AI, gaming, and capital markets intersect right now.
-   - Scenes 34-36 (Sign-Off): Concise wrap-up, audience question, and Quick Shift Creative subscribe cue."""
+   - Scenes 34-36 (Warm Sign-Off): Concise wrap-up, audience question, casual ask to like, share, and subscribe, ending clearly with "Thank you for watching." """
     return role_desc, structure
 
 
 def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts, content_mode):
-    """Zero-crash fallback: constructs a clean broadcast briefing from live headlines if Gemini is 100% down."""
     print("[ScriptAI] All AI pools temporarily overloaded (503) — activating Live Headlines Backup Blueprint!")
     clean_heads = []
     for raw in combined_topics:
@@ -197,43 +239,51 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
             "Gaming Studios Rethink Next-Gen Releases Amid Rising Hardware Demand",
             "Wall Street Watches Tech Earnings and Cloud Infrastructure Spending Closely",
             "New AI Tools Reshape Software Workflows Across Silicon Valley",
+            "Hardware Supply Chains Brace For Next Quarter Demand Spike",
         ]
 
     lead_story = custom_topic.strip() if custom_topic else clean_heads[0]
     s2 = clean_heads[1 % len(clean_heads)]
     s3 = clean_heads[2 % len(clean_heads)]
     s4 = clean_heads[3 % len(clean_heads)]
+    s5 = clean_heads[4 % len(clean_heads)]
 
     base_scenes = [
         {
-            "narration": f"Big moves just hit the tech and market radar today. Here is what everyone is watching: {lead_story}.",
+            "narration": f"Big moves just hit the tech and market radar today, and this one is moving fast. Here is what everyone is watching right now: {lead_story}.",
             "visual_query": "breaking tech news studio",
             "tone": "hook",
             "highlight_text": lead_story[:68],
         },
         {
-            "narration": f"Look closer at the momentum building right now. {s2}. That shift is already forcing rivals to react fast.",
+            "narration": f"Look closer at the momentum building behind the scenes. {s2}. That shift is already forcing major rivals to rethink their next move.",
             "visual_query": "artificial intelligence data center",
             "tone": "urgent",
             "highlight_text": s2[:68],
         },
         {
-            "narration": f"Meanwhile, another major story is catching serious attention across the industry. {s3}.",
+            "narration": f"Meanwhile, Wall Street and analysts are keeping a close eye on this development as well. {s3}. When numbers move this fast, markets react quickly.",
             "visual_query": "stock market trading chart",
             "tone": "analytical",
             "highlight_text": s3[:68],
         },
         {
-            "narration": f"And here is the angle most people miss at first glance. {s4}. Numbers like these rarely stay quiet for long.",
+            "narration": f"And here is the angle most people miss at first glance. {s4}. That ripple effect reaches everyday users and gamers much sooner than expected.",
             "visual_query": "gaming setup neon hardware",
             "tone": "serious",
             "highlight_text": s4[:68],
         },
         {
-            "narration": f"Which of these shifts hits biggest next week? Drop your take below and follow {CHANNEL_NAME} for daily updates.",
-            "visual_query": "futuristic technology abstract",
+            "narration": f"On top of that, keep an eye on what is brewing next. {s5}. The next few weeks could completely reshape how this plays out.",
+            "visual_query": "futuristic microchip technology",
+            "tone": "excited",
+            "highlight_text": s5[:68],
+        },
+        {
+            "narration": random.choice(SHORTS_CASUAL_OUTROS),
+            "visual_query": "modern dark minimalist studio background",
             "tone": "calm",
-            "highlight_text": "What happens next in Tech & Markets?",
+            "highlight_text": "Like, Share & Subscribe",
         },
     ]
 
@@ -241,9 +291,9 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
         scenes = base_scenes
     else:
         scenes = []
-        for k in range(36):
+        for k in range(35):
             h_pick = clean_heads[k % len(clean_heads)]
-            tone = "hook" if k == 0 else ("calm" if k >= 34 else ("urgent" if k % 3 == 1 else "analytical"))
+            tone = "hook" if k == 0 else ("urgent" if k % 3 == 1 else "analytical")
             scenes.append({
                 "narration": (
                     f"Another key development shaping today's briefing is this: {h_pick}. "
@@ -253,6 +303,12 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
                 "tone": tone,
                 "highlight_text": h_pick[:68],
             })
+        scenes.append({
+            "narration": random.choice(LONG_CASUAL_OUTROS),
+            "visual_query": "modern dark minimalist studio background",
+            "tone": "calm",
+            "highlight_text": "Like, Share & Subscribe",
+        })
 
     title = lead_story[:88]
     if is_shorts and "#shorts" not in title.lower():
@@ -289,12 +345,12 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
         content_mode = "news_bulletin"
 
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
-    scene_count = "5" if is_shorts else "36"
-    words_per_scene = "22-28" if is_shorts else "38-45"
+    scene_count = "6" if is_shorts else "36"
+    words_per_scene = "25-30" if is_shorts else "38-45"
     duration_hint = (
-        "45-55 seconds total (fast-paced YouTube Shorts)"
+        "55-62 seconds total (stretched, high-retention YouTube Shorts with smooth casual outro)"
         if is_shorts
-        else "8.5 to 10 minutes total (~1,400 to 1,550 spoken words)"
+        else "8.5 to 10 minutes total (~1,400 to 1,550 spoken words with warm outro)"
     )
 
     memory = load_strategy_memory()
@@ -323,7 +379,7 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
         topic_block = f"LIVE HEADLINES & TRENDS:\n{topics_list}"
 
     role_desc, structure_guide = _build_mode_instructions(content_mode, is_shorts)
-    format_label = "YouTube Shorts (9:16 vertical)" if is_shorts else "Long-Form Horizontal YouTube Video (16:9, 8-10 minutes)"
+    format_label = "YouTube Shorts (9:16 vertical, ~58 seconds)" if is_shorts else "Long-Form Horizontal YouTube Video (16:9, 8-10 minutes)"
 
     prompt = f"""You are the {role_desc} for "{CHANNEL_NAME}".
 {mem_hint}
@@ -344,6 +400,7 @@ Human-Like Spoken Script Rules (CRITICAL):
 - Write like a real YouTube host talking to a smart friend — NEVER like a formal article or AI essay.
 - Sprinkle natural human conversational bridges across the script (e.g., "Wait, look at that number again.", "Sounds great on paper, right? Not quite.", "Here is where it gets messy.", "Think about what that actually means.").
 - Mix short 4-word punchy sentences with medium explanatory sentences so the voice rhythm feels alive.
+- MANDATORY OUTRO RULE: The FINAL scene MUST sound relaxed and natural, casually invite viewers to like, share, and subscribe to {CHANNEL_NAME}, and end with the exact closing line "Thank you for watching."
 - NEVER use AI clichés: "delve", "game-changer", "landscape", "buckle up", "revolutionary", "let's dive in", "in conclusion", "ever-evolving", "tapestry", "testament", "welcome back".
 - NO emojis, NO markdown, NO stage directions in narration.
 - For each scene, set `"tone"` to one of: `"hook"`, `"urgent"`, `"excited"`, `"serious"`, `"analytical"`, `"calm"`.
@@ -386,7 +443,7 @@ Return ONLY valid JSON (no markdown fences, no commentary):
 }}
 """
 
-    max_tokens = 2800 if is_shorts else 7600
+    max_tokens = 3200 if is_shorts else 7800
     models_to_try = _discover_gemini_models()
     last_error = None
     valid_tones = {"hook", "urgent", "excited", "serious", "analytical", "calm"}
@@ -458,6 +515,7 @@ Return ONLY valid JSON (no markdown fences, no commentary):
                         "highlight_text": _clean_narration(sc.get("highlight_text", ""))[:72],
                     })
 
+                cleaned_scenes = _ensure_casual_outro(cleaned_scenes, is_shorts)
                 blueprint["scenes"] = cleaned_scenes
                 if not blueprint["scenes"]:
                     raise ValueError("Empty scenes")
