@@ -3,6 +3,8 @@ import json
 import os
 import random
 import re
+import urllib.parse
+import requests
 
 try:
     from zoneinfo import ZoneInfo
@@ -11,9 +13,8 @@ except Exception:
     US_EASTERN = timezone(timedelta(hours=-5))
 
 MEMORY_FILE = "strategy_memory.json"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-# Baseline US audience peak traffic weights (0-23 in America/New_York time)
-# Used as smart priors and automatically blended with real channel view/reach data
 US_BASELINE_SHORTS_WEEKDAY = {
     8: 1.28, 9: 1.15, 11: 1.18, 12: 1.32, 13: 1.20,
     16: 1.22, 17: 1.36, 18: 1.28, 19: 1.30, 20: 1.40, 21: 1.34, 22: 1.22,
@@ -36,6 +37,10 @@ DEFAULT_MEMORY = {
     "long_score": 1.0,
     "winning_topics": ["AI chips & Nvidia", "US tech market shifts", "viral gaming releases"],
     "avoid_patterns": ["generic clickbait without proof", "slow robotic intros"],
+    "winning_title_patterns": ["curiosity_contrast", "specific_number"],
+    "winning_keywords": ["ai news", "nvidia", "tech news", "gaming", "stock market"],
+    "recent_viewer_comments": [],
+    "healed_video_ids": [],
     "golden_hour_shorts_et": 20,
     "golden_hour_long_et": 20,
     "top_hours_shorts_et": [20, 17, 12, 8],
@@ -67,6 +72,40 @@ def save_strategy_memory(mem):
         print(f"[LearningEngine] Warning saving memory: {e}")
 
 
+def fetch_youtube_autocomplete_keywords(seed_topic, max_results=14):
+    """Fetches real-time high-demand US YouTube Search autocomplete keywords for SEO ranking."""
+    clean_seed = re.sub(r"[^a-zA-Z0-9\s]", " ", str(seed_topic or "")).strip()
+    words = [w for w in clean_seed.split() if len(w) > 2]
+    queries = []
+    if words:
+        queries.append(" ".join(words[:4]))
+        if len(words) >= 2:
+            queries.append(" ".join(words[:2]))
+        queries.append(f"{words[0]} news")
+    else:
+        queries.append("tech news today")
+
+    found = []
+    for q in queries[:3]:
+        try:
+            url = (
+                "https://suggestqueries.google.com/complete/search"
+                f"?client=firefox&ds=yt&hl=en&gl=us&q={urllib.parse.quote_plus(q)}"
+            )
+            r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=8)
+            if r.status_code == 200:
+                payload = r.json()
+                suggestions = payload[1] if isinstance(payload, list) and len(payload) > 1 else []
+                for s in suggestions:
+                    s_clean = re.sub(r"\s+", " ", str(s)).strip()
+                    if s_clean and s_clean.lower() not in [x.lower() for x in found]:
+                        found.append(s_clean)
+        except Exception:
+            continue
+
+    return found[:max_results]
+
+
 def _parse_iso_duration_seconds(dur_str):
     if not dur_str:
         return 0
@@ -88,6 +127,20 @@ def _parse_utc_dt(iso_str):
         return None
 
 
+def _classify_title_pattern(title):
+    t = (title or "").strip()
+    low = t.lower()
+    if "?" in t:
+        return "curiosity_question"
+    if re.search(r"\b\d+[%$BMKbm]?\b", t):
+        return "specific_number"
+    if any(w in low for w in ("vs", "versus", "secret", "truth", "hidden", "why", "scandal", "crash")):
+        return "curiosity_contrast"
+    if any(w in low for w in ("breaking", "just", "alert", "update", "today")):
+        return "urgent_breaking"
+    return "direct_statement"
+
+
 def _get_baseline_map(video_format, is_weekend):
     if video_format == "shorts":
         return US_BASELINE_SHORTS_WEEKEND if is_weekend else US_BASELINE_SHORTS_WEEKDAY
@@ -95,7 +148,6 @@ def _get_baseline_map(video_format, is_weekend):
 
 
 def _compute_ranked_hours(hourly_bucket, video_format, is_weekend):
-    """Blends US peak traffic priors with actual channel hourly views & velocity."""
     priors = _get_baseline_map(video_format, is_weekend)
     all_avgs = [v["avg_reach"] for v in hourly_bucket.values() if v.get("count", 0) > 0 and v.get("avg_reach", 0) > 0]
     global_avg = (sum(all_avgs) / len(all_avgs)) if all_avgs else 0.0
@@ -107,7 +159,6 @@ def _compute_ranked_hours(hourly_bucket, video_format, is_weekend):
         if stat and stat.get("count", 0) > 0 and global_avg > 0:
             cnt = int(stat["count"])
             rel_perf = float(stat["avg_reach"]) / global_avg
-            # As real video samples grow, channel data overrides baseline up to 85%
             real_weight = min(0.85, cnt / (cnt + 2.5))
             blended = (1.0 - real_weight) * prior_w + real_weight * rel_perf
         else:
@@ -118,8 +169,33 @@ def _compute_ranked_hours(hourly_bucket, video_format, is_weekend):
     return scored
 
 
+def _fetch_recent_viewer_comments(youtube_service, video_ids):
+    """Pulls 1-3 real viewer comments from recent videos so AI can shout out the community."""
+    comments_out = []
+    for vid in video_ids[:5]:
+        try:
+            c_resp = youtube_service.commentThreads().list(
+                part="snippet",
+                videoId=vid,
+                order="relevance",
+                maxResults=3,
+                textFormat="plainText",
+            ).execute()
+            for item in c_resp.get("items", []):
+                top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+                author = str(top.get("authorDisplayName", "")).strip()
+                txt = re.sub(r"\s+", " ", str(top.get("textDisplay", ""))).strip()
+                if len(txt) >= 12 and "quick shift creative" not in author.lower():
+                    comments_out.append(f"{author}: {txt[:120]}")
+                if len(comments_out) >= 3:
+                    return comments_out
+        except Exception:
+            continue
+    return comments_out
+
+
 def update_strategy_from_youtube(youtube_service=None):
-    """Learns winning formats, topics, US Eastern peak hours, and Golden Hour from live YouTube stats."""
+    """100x Self-Learning Brain: learns formats, title hooks, SEO keywords, viewer comments & US Golden Hours."""
     mem = load_strategy_memory()
     if youtube_service is None:
         return mem
@@ -146,10 +222,14 @@ def update_strategy_from_youtube(youtube_service=None):
         now_utc = datetime.now(timezone.utc)
         shorts_views, long_views = [], []
         hourly_raw = {"shorts": {}, "long": {}}
+        pattern_scores = {}
+        keyword_scores = {}
         top_performing = []
         live_scheduled_slots = {}
+        public_vid_ids = []
 
         for v in v_resp.get("items", []):
+            vid_id = v.get("id", "")
             snip = v.get("snippet", {})
             stats = v.get("statistics", {})
             cdet = v.get("contentDetails", {})
@@ -158,7 +238,6 @@ def update_strategy_from_youtube(youtube_service=None):
             dur_s = _parse_iso_duration_seconds(cdet.get("duration", ""))
             v_fmt = "shorts" if dur_s <= 120 else "long"
 
-            # Track already-scheduled upcoming YouTube videos to avoid slot collisions
             pub_at_str = status.get("publishAt")
             if pub_at_str:
                 sched_dt = _parse_utc_dt(pub_at_str)
@@ -172,10 +251,10 @@ def update_strategy_from_youtube(youtube_service=None):
                     })
                 continue
 
-            # Only learn audience timing & reach from public videos
             if status.get("privacyStatus") != "public":
                 continue
 
+            public_vid_ids.append(vid_id)
             views = int(stats.get("viewCount", 0))
             likes = int(stats.get("likeCount", 0))
             comments = int(stats.get("commentCount", 0))
@@ -184,7 +263,6 @@ def update_strategy_from_youtube(youtube_service=None):
                 continue
 
             age_hours = max(2.0, (now_utc - pub_dt).total_seconds() / 3600.0)
-            # Engagement + age-adjusted velocity rewards videos that take off fast
             eng_boost = 1.0 + min(0.5, ((likes + comments * 3.0) / max(1, views)) * 5.0)
             velocity = (views / (age_hours ** 0.65)) * eng_boost
             reach_score = (views * 0.55 + velocity * 12.0) * eng_boost
@@ -204,13 +282,23 @@ def update_strategy_from_youtube(youtube_service=None):
             title_clean = re.sub(r"#\w+", "", snip.get("title", "")).strip()
             if title_clean:
                 top_performing.append((reach_score, title_clean))
+                pat = _classify_title_pattern(title_clean)
+                p_b = pattern_scores.setdefault(pat, {"sum": 0.0, "cnt": 0})
+                p_b["sum"] += reach_score
+                p_b["cnt"] += 1
+
+            for tg in (snip.get("tags") or [])[:12]:
+                tg_low = str(tg).strip().lower()
+                if len(tg_low) >= 3:
+                    k_b = keyword_scores.setdefault(tg_low, {"sum": 0.0, "cnt": 0})
+                    k_b["sum"] += reach_score
+                    k_b["cnt"] += 1
 
         if shorts_views:
             mem["shorts_score"] = round(sum(shorts_views) / len(shorts_views), 2)
         if long_views:
             mem["long_score"] = round(sum(long_views) / len(long_views), 2)
 
-        # Summarize hourly performance per format
         hourly_summary = {"shorts": {}, "long": {}}
         for fmt in ("shorts", "long"):
             for hr_k, b in hourly_raw[fmt].items():
@@ -236,10 +324,21 @@ def update_strategy_from_youtube(youtube_service=None):
             top_performing.sort(key=lambda x: x[0], reverse=True)
             mem["winning_topics"] = [t[:65] for _, t in top_performing[:5]]
 
-        # Merge live YouTube upcoming scheduled slots into memory
+        if pattern_scores:
+            ranked_pats = sorted(pattern_scores.items(), key=lambda x: x[1]["sum"] / max(1, x[1]["cnt"]), reverse=True)
+            mem["winning_title_patterns"] = [p for p, _ in ranked_pats[:3]]
+
+        if keyword_scores:
+            ranked_kws = sorted(keyword_scores.items(), key=lambda x: x[1]["sum"] / max(1, x[1]["cnt"]), reverse=True)
+            mem["winning_keywords"] = [k for k, _ in ranked_kws[:10]]
+
+        if public_vid_ids:
+            fresh_comments = _fetch_recent_viewer_comments(youtube_service, public_vid_ids)
+            if fresh_comments:
+                mem["recent_viewer_comments"] = fresh_comments
+
         sched_mem = mem.get("scheduled_slots") or {}
         today_str = now_et.strftime("%Y-%m-%d")
-        # Prune old dates (> 2 days old)
         sched_mem = {k: v for k, v in sched_mem.items() if k >= today_str}
         for d_k, entries in live_scheduled_slots.items():
             existing = sched_mem.setdefault(d_k, [])
@@ -251,8 +350,9 @@ def update_strategy_from_youtube(youtube_service=None):
 
         save_strategy_memory(mem)
         print(
-            f"[LearningEngine] Updated memory -> Shorts avg: {mem['shorts_score']} | Long avg: {mem['long_score']} | "
-            f"US Golden Hours (ET): Shorts={mem['golden_hour_shorts_et']:02d}:00, Long={mem['golden_hour_long_et']:02d}:00"
+            f"[LearningEngine] 100x Sync -> Shorts avg: {mem['shorts_score']} | Long avg: {mem['long_score']} | "
+            f"Golden ET: Shorts={mem['golden_hour_shorts_et']:02d}:00, Long={mem['golden_hour_long_et']:02d}:00 | "
+            f"Top Hooks: {', '.join(mem.get('winning_title_patterns', []))}"
         )
     except Exception as e:
         print(f"[LearningEngine] Stats sync skipped: {e}")
@@ -260,15 +360,180 @@ def update_strategy_from_youtube(youtube_service=None):
     return mem
 
 
+def _gemini_seo_rewrite(gemini_api_key, old_title, old_desc, seo_keywords, is_shorts, winning_patterns):
+    """Calls Gemini to craft a higher-CTR, search-optimized Title, Description & Tags within 48h window."""
+    if not gemini_api_key:
+        return None
+
+    kw_str = ", ".join(seo_keywords[:12]) if seo_keywords else "tech news, ai news, gaming, stock market"
+    prompt = f"""You are a YouTube US SEO & CTR Optimization Specialist.
+An uploaded {'YouTube Short' if is_shorts else 'Long-Form YouTube Video'} is underperforming in its first 48 hours.
+Rewrite its Title, SEO Description (keep any existing timestamps intact), and Tags to maximize US Search ranking and Browse/Shorts Feed CTR.
+
+Current Title: {old_title}
+Current Description: {old_desc[:1200]}
+Live US YouTube Autocomplete Keywords: {kw_str}
+Channel's Best-Performing Title Hook Styles: {', '.join(winning_patterns or ['curiosity_contrast'])}
+
+Rules:
+- Title: Punchy, high curiosity, under 88 chars, naturally include the strongest search keyword. {'End with #Shorts.' if is_shorts else 'No #Shorts tag.'}
+- Description: First 2 lines must be ultra-SEO friendly with natural keywords + call to action, preserve any 00:00 chapter lines if present, end with 4-6 relevant hashtags.
+- Tags: 15-20 high-relevance US search keywords (no # symbols).
+
+Return ONLY valid JSON:
+{{
+  "title": "string",
+  "description": "string",
+  "tags": ["kw1", "kw2"]
+}}
+"""
+    models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemma-3-27b-it"]
+    for model in models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+            cfg = {"temperature": 0.7, "maxOutputTokens": 1200}
+            if "gemma" not in model:
+                cfg["responseMimeType"] = "application/json"
+            resp = requests.post(
+                url,
+                json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg},
+                timeout=45,
+            )
+            if resp.status_code != 200:
+                continue
+            raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"\s*```$", "", raw)
+            s, e = raw.find("{"), raw.rfind("}")
+            if s != -1 and e != -1:
+                raw = raw[s : e + 1]
+            data = json.loads(raw)
+            if data.get("title") and data.get("description"):
+                return data
+        except Exception:
+            continue
+    return None
+
+
+def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_run=2):
+    """
+    Auto-scans public videos published 6h to 48h ago.
+    If views lag behind channel benchmark, researches live YouTube Autocomplete keywords
+    and updates Title + SEO Description + Tags once to revive search & feed ranking.
+    """
+    if not youtube_service or not gemini_api_key:
+        return
+
+    mem = load_strategy_memory()
+    healed_ids = set(mem.get("healed_video_ids") or [])
+
+    try:
+        ch_resp = youtube_service.channels().list(part="contentDetails", mine=True).execute()
+        items = ch_resp.get("items", [])
+        if not items:
+            return
+        uploads_pl = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        pl_resp = youtube_service.playlistItems().list(
+            part="contentDetails", playlistId=uploads_pl, maxResults=20
+        ).execute()
+        vid_ids = [it["contentDetails"]["videoId"] for it in pl_resp.get("items", []) if it.get("contentDetails")]
+        if not vid_ids:
+            return
+
+        v_resp = youtube_service.videos().list(
+            part="snippet,statistics,contentDetails,status",
+            id=",".join(vid_ids[:20]),
+        ).execute()
+
+        now_utc = datetime.now(timezone.utc)
+        repaired = 0
+        shorts_thresh = max(80.0, float(mem.get("shorts_score", 100.0)) * 0.60)
+        long_thresh = max(35.0, float(mem.get("long_score", 30.0)) * 0.70)
+
+        for v in v_resp.get("items", []):
+            if repaired >= max_repairs_per_run:
+                break
+            vid_id = v.get("id", "")
+            if not vid_id or vid_id in healed_ids:
+                continue
+
+            status = v.get("status", {})
+            if status.get("privacyStatus") != "public":
+                continue
+
+            snip = v.get("snippet", {})
+            stats = v.get("statistics", {})
+            cdet = v.get("contentDetails", {})
+
+            pub_dt = _parse_utc_dt(snip.get("publishedAt", ""))
+            if not pub_dt:
+                continue
+            age_h = (now_utc - pub_dt).total_seconds() / 3600.0
+            if not (6.0 <= age_h <= 48.0):
+                continue
+
+            dur_s = _parse_iso_duration_seconds(cdet.get("duration", ""))
+            is_shorts = dur_s <= 120
+            views = int(stats.get("viewCount", 0))
+            thresh = shorts_thresh if is_shorts else long_thresh
+
+            if views >= thresh:
+                continue
+
+            old_title = snip.get("title", "")
+            old_desc = snip.get("description", "")
+            cat_id = snip.get("categoryId", "28")
+
+            live_kws = fetch_youtube_autocomplete_keywords(old_title, max_results=14)
+            rewritten = _gemini_seo_rewrite(
+                gemini_api_key,
+                old_title,
+                old_desc,
+                live_kws,
+                is_shorts,
+                mem.get("winning_title_patterns", []),
+            )
+            if not rewritten:
+                continue
+
+            new_title = str(rewritten["title"]).strip()[:98]
+            if is_shorts and "#shorts" not in new_title.lower() and len(new_title) <= 90:
+                new_title += " #Shorts"
+            new_desc = str(rewritten["description"]).strip()[:4900]
+            new_tags = [str(t).strip() for t in (rewritten.get("tags") or live_kws) if str(t).strip()][:25]
+
+            try:
+                youtube_service.videos().update(
+                    part="snippet",
+                    body={
+                        "id": vid_id,
+                        "snippet": {
+                            "title": new_title,
+                            "description": new_desc,
+                            "tags": new_tags,
+                            "categoryId": cat_id,
+                            "defaultLanguage": "en",
+                        },
+                    },
+                ).execute()
+                healed_ids.add(vid_id)
+                repaired += 1
+                print(
+                    f"[SEO-SelfHeal 48h] Refreshed ({age_h:.1f}h old, {views} views) -> "
+                    f"'{old_title[:45]}' => '{new_title[:55]}'"
+                )
+            except Exception as upd_e:
+                print(f"[SEO-SelfHeal 48h] Update skipped for {vid_id} (check OAuth scope): {upd_e}")
+                break
+
+        if repaired > 0:
+            mem["healed_video_ids"] = list(healed_ids)[-120:]
+            save_strategy_memory(mem)
+    except Exception as e:
+        print(f"[SEO-SelfHeal 48h] Check skipped: {e}")
+
+
 def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
-    """
-    Smart US Audience Auto-Scheduler:
-    1. Guarantees 1 daily video is locked to the learned US Golden Hour (if upcoming & unclaimed).
-    2. Otherwise picks the next highest-scoring unclaimed US peak hour in the next 10 hours.
-    3. Leaves 15% controlled exploration on strong untested US hours so AI keeps improving.
-    4. Always keeps >= 30 min lead time so YouTube finishes HD processing & copyright checks.
-    Returns: (publish_at_utc_iso, human_readable_summary, chosen_hour_et, date_et_key)
-    """
     mem = load_strategy_memory()
     fmt = "shorts" if str(video_format).strip().lower() == "shorts" else "long"
 
@@ -288,7 +553,6 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
     claimed_hours_any = {int(x["hour_et"]) for x in claimed_today}
 
     def _candidate_dt_for_hour(hr):
-        # Pick :15 past the hour (less crowded than :00 when thousands of channels auto-drop)
         cand = earliest_et.replace(hour=hr, minute=15, second=0, microsecond=0)
         if cand < earliest_et:
             cand = earliest_et.replace(hour=hr, minute=45, second=0, microsecond=0)
@@ -297,7 +561,6 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
     chosen_dt = None
     reason = ""
 
-    # Priority 1: Anchor the learned US Golden Hour once every day (within next 9 hours)
     if golden_hr not in claimed_hours_same_fmt:
         g_dt = _candidate_dt_for_hour(golden_hr)
         delta_h = (g_dt - now_et).total_seconds() / 3600.0
@@ -305,7 +568,6 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
             chosen_dt = g_dt
             reason = f"Golden Hour Lock ({golden_hr:02d}:15 ET — #1 learned reach slot)"
 
-    # Priority 2: Smart upcoming US peak window (within next 5.5 hours)
     if chosen_dt is None:
         upcoming_candidates = []
         for hr, score in ranked[:12]:
@@ -318,7 +580,6 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
                 upcoming_candidates.append((hr, score, samples, c_dt))
 
         if upcoming_candidates:
-            # 15% smart exploration of a strong US hour with 0 samples so AI keeps discovering better times
             untested = [c for c in upcoming_candidates if c[2] == 0]
             if untested and random.random() < 0.15:
                 pick = untested[0]
@@ -329,7 +590,6 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
                 chosen_dt = pick[3]
                 reason = f"Learned US Peak Slot ({pick[0]:02d}:15 ET, score={pick[1]})"
 
-    # Priority 3: Safe fallback (+35 min lead time rounded to next 5-min mark)
     if chosen_dt is None:
         raw_dt = now_et + timedelta(minutes=max(35, int(min_lead_minutes)))
         rem = raw_dt.minute % 5
@@ -345,7 +605,6 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
 
 
 def record_scheduled_slot(video_format, hour_et, date_et_key, publish_iso):
-    """Saves the claimed US time slot in strategy_memory.json so future runs never double-book."""
     mem = load_strategy_memory()
     sched = mem.get("scheduled_slots") or {}
     day_list = sched.setdefault(date_et_key, [])
