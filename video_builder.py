@@ -93,11 +93,7 @@ def _pick_local_music_fallback(music_direction, mode, is_shorts, rng):
 def _compute_safe_music_volume(music_direction, is_shorts):
     md = music_direction or {}
     intensity = str(md.get("intensity", "balanced")).strip().lower()
-    base_map = {
-        "subtle": 0.068,
-        "balanced": 0.088,
-        "energetic": 0.108,
-    }
+    base_map = {"subtle": 0.068, "balanced": 0.088, "energetic": 0.108}
     vol = base_map.get(intensity, 0.085)
 
     if "volume_scale" in md:
@@ -131,8 +127,92 @@ def _draw_centered_text(draw, center_x, y, text, font, fill):
     draw.text((center_x - tw // 2, y), text, fill=fill, font=font)
 
 
+def _create_progress_bar_png(out_png, width, bar_h=10):
+    img = Image.new("RGBA", (width, bar_h), (250, 204, 21, 245))
+    img.save(out_png, "PNG")
+    return out_png
+
+
+def _create_countdown_card_png(out_png, width, height, prompt_text):
+    """Interactive 2-Second Quick Guess Badge card."""
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    is_vertical = height > width
+    cx = width // 2
+
+    box_w = int(width * 0.86) if is_vertical else min(int(width * 0.60), 960)
+    box_h = 250 if is_vertical else 220
+    x0 = (width - box_w) // 2
+    y0 = int(height * 0.15) if is_vertical else int(height * 0.14)
+    x1, y1 = x0 + box_w, y0 + box_h
+
+    gold = (250, 204, 21, 255)
+    bg = (14, 17, 24, 238)
+    white = (248, 250, 252, 255)
+
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=24, fill=bg, outline=gold, width=3)
+    draw.rounded_rectangle([cx - 180, y0 + 22, cx + 180, y0 + 62], radius=12, fill=gold)
+    _draw_centered_text(draw, cx, y0 + 29, "QUICK GUESS • 2 SECONDS", _find_font(22), (10, 12, 16, 255))
+
+    txt = (prompt_text or "What do you think happens next?")[:46]
+    _draw_centered_text(draw, cx, y0 + 96, txt, _find_font(34 if is_vertical else 38), white)
+    _draw_centered_text(draw, cx, y1 - 54, "Drop your guess before the reveal...", _find_font(22), gold)
+
+    canvas.save(out_png, "PNG")
+    return out_png
+
+
+def _create_debate_card_png(out_png, width, height, debate_card):
+    """Split-screen A vs B Interactive Debate Card driving 1-or-2 comments."""
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    is_vertical = height > width
+    cx = width // 2
+
+    dc = debate_card or {}
+    opt_a = str(dc.get("option_a", "REAL SHIFT")).upper()[:20]
+    opt_b = str(dc.get("option_b", "PURE HYPE")).upper()[:20]
+    q_lbl = str(dc.get("question", "COMMENT 1 OR 2 BELOW")).upper()[:30]
+
+    box_w = int(width * 0.88) if is_vertical else min(int(width * 0.68), 1060)
+    box_h = 285 if is_vertical else 245
+    x0 = (width - box_w) // 2
+    y0 = int(height * 0.14) if is_vertical else int(height * 0.13)
+    x1, y1 = x0 + box_w, y0 + box_h
+
+    bg = (12, 15, 22, 238)
+    gold = (250, 204, 21, 255)
+    green = (34, 211, 138, 255)
+    red = (244, 63, 94, 255)
+    white = (248, 250, 252, 255)
+
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=24, fill=bg, outline=(255, 255, 255, 55), width=2)
+    _draw_centered_text(draw, cx, y0 + 20, "PICK YOUR SIDE", _find_font(24), gold)
+
+    # Left pill (1) & Right pill (2)
+    half_w = (box_w - 96) // 2
+    py0 = y0 + 68
+    py1 = y0 + (186 if is_vertical else 166)
+    draw.rounded_rectangle([x0 + 24, py0, x0 + 24 + half_w, py1], radius=16, fill=(14, 34, 28, 240), outline=green, width=3)
+    draw.rounded_rectangle([x1 - 24 - half_w, py0, x1 - 24, py1], radius=16, fill=(38, 16, 22, 240), outline=red, width=3)
+
+    _draw_centered_text(draw, x0 + 24 + half_w // 2, py0 + 18, "1", _find_font(34), green)
+    _draw_centered_text(draw, x0 + 24 + half_w // 2, py0 + 64, opt_a, _find_font(24 if is_vertical else 28), white)
+
+    _draw_centered_text(draw, x1 - 24 - half_w // 2, py0 + 18, "2", _find_font(34), red)
+    _draw_centered_text(draw, x1 - 24 - half_w // 2, py0 + 64, opt_b, _find_font(24 if is_vertical else 28), white)
+
+    # Center VS circle
+    draw.ellipse([cx - 28, (py0 + py1) // 2 - 28, cx + 28, (py0 + py1) // 2 + 28], fill=gold)
+    _draw_centered_text(draw, cx, (py0 + py1) // 2 - 14, "VS", _find_font(24), (10, 12, 16, 255))
+
+    _draw_centered_text(draw, cx, y1 - 48, q_lbl, _find_font(24), gold)
+
+    canvas.save(out_png, "PNG")
+    return out_png
+
+
 def _create_outro_card_png(out_png, width, height):
-    """Creates a clean dark-gold glassmorphism Outro Card positioned cleanly above captions."""
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
     is_vertical = height > width
@@ -141,8 +221,7 @@ def _create_outro_card_png(out_png, width, height):
     box_h = 370 if is_vertical else 310
     x0 = (width - box_w) // 2
     y0 = int(height * 0.22) if is_vertical else int(height * 0.17)
-    x1 = x0 + box_w
-    y1 = y0 + box_h
+    x1, y1 = x0 + box_w, y0 + box_h
     cx = width // 2
 
     gold = (250, 204, 21, 255)
@@ -160,7 +239,6 @@ def _create_outro_card_png(out_png, width, height):
     _draw_centered_text(draw, cx, y0 + 38, "THANK YOU FOR WATCHING", f_title, white)
     _draw_centered_text(draw, cx, y0 + 112, (CHANNEL_NAME or "Quick Shift Creative").upper(), f_sub, gold)
 
-    # Three clean CTA pills: LIKE | SHARE | SUBSCRIBE
     pills = ["LIKE", "SHARE", "SUBSCRIBE"]
     pill_w = 215 if is_vertical else 240
     pill_h = 62
@@ -200,8 +278,7 @@ def _create_newsroom_highlight_card(out_png, width, height, badge_text, headline
     box_h = 330 if is_vertical else 255
     x0 = (width - box_w) // 2
     y0 = int(height * 0.13) if is_vertical else int(height * 0.12)
-    x1 = x0 + box_w
-    y1 = y0 + box_h
+    x1, y1 = x0 + box_w, y0 + box_h
 
     draw.rounded_rectangle([x0, y0, x1, y1], radius=24, fill=bg_col, outline=(255, 255, 255, 45), width=2)
     draw.rounded_rectangle([x0, y0, x1, y0 + 10], radius=6, fill=acc_col)
@@ -433,6 +510,7 @@ def _master_voice_and_music(
     out_audio_wav,
     music_direction=None,
     sfx_events=None,
+    music_drops=None,
 ):
     rng = random.Random(404)
 
@@ -474,6 +552,10 @@ def _master_voice_and_music(
     if not sfx_impact:
         sfx_impact = _pick_sfx_by_keywords(sfx_pool, ["boom", "impact", "market", "riser"], rng)
 
+    sfx_tick = fetch_freesound_sfx("clock ticking timer", os.path.join(work_dir, "fs_tick.mp3"))
+    if not sfx_tick:
+        sfx_tick = sfx_pop
+
     inputs = ["-i", v_master]
     idx = 1
     parts = ["[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[vnorm]"]
@@ -491,11 +573,18 @@ def _master_voice_and_music(
         inputs.extend(["-i", m_norm])
         fade_out_d = 2.0 if not is_shorts else 1.6
         fade_out_st = max(0.5, total_dur - fade_out_d)
+
+        # Build dramatic 1.8s music-drop mute windows on key twist scenes
+        drop_filters = ""
+        for d0, d1 in (music_drops or [])[:3]:
+            if d1 > d0:
+                drop_filters += f",volume=0.05:enable='between(t,{d0:.2f},{d1:.2f})'"
+
         parts.append(f"{cur_v}asplit=2[v_for_mix][v_for_sc]")
         parts.append(
             f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"atrim=0:{total_dur:.2f},afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_st:.2f}:d={fade_out_d:.2f},"
-            f"volume={music_vol:.3f}[mbase]"
+            f"volume={music_vol:.3f}{drop_filters}[mbase]"
         )
         parts.append("[mbase][v_for_sc]sidechaincompress=threshold=0.025:ratio=6:attack=15:release=280[mduck]")
         parts.append("[v_for_mix][mduck]amix=inputs=2:duration=first:normalize=0[vmix]")
@@ -505,9 +594,9 @@ def _master_voice_and_music(
     events = sfx_events or {}
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_whoosh, events.get("whoosh", []), 0.9, 0.14, "wh")
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_pop, events.get("pop", []), 0.6, 0.18, "pp")
-    cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_impact, events.get("impact", []), 1.2, 0.20, "im")
+    cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_impact, events.get("impact", []), 1.2, 0.22, "im")
+    cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_tick, events.get("tick", []), 1.7, 0.22, "tk")
 
-    # Gentle final audio fade-out over the last 1.0s so audio never ends abruptly
     final_afade_st = max(0.5, total_dur - 1.0)
     parts.append(f"{cur_v}alimiter=limit=0.95,afade=t=out:st={final_afade_st:.2f}:d=1.0[am_final]")
 
@@ -523,18 +612,17 @@ def _master_voice_and_music(
     return out_audio_wav
 
 
-def _burn_subtitles_and_fade(video_mp4, subtitle_path, out_mp4, is_shorts, total_dur):
-    """Burns pop captions and applies a smooth 1.2s fade-to-black at the end of every video."""
+def _burn_subtitles_and_fade(video_mp4, subtitle_path, out_mp4, is_shorts, total_dur, work_dir):
+    """Burns pop captions, adds a sleek animated top gold progress bar on Shorts, and fades smoothly to black."""
     fade_d = 1.2
     fade_st = max(0.2, float(total_dur) - fade_d)
     fade_filter = f"fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}"
 
-    if not subtitle_path or not os.path.exists(subtitle_path) or os.path.getsize(subtitle_path) == 0:
-        vf_chain = fade_filter
-    else:
+    sub_filter = ""
+    if subtitle_path and os.path.exists(subtitle_path) and os.path.getsize(subtitle_path) > 0:
         escaped = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
         if subtitle_path.lower().endswith(".ass"):
-            vf_chain = f"ass='{escaped}',{fade_filter}"
+            sub_filter = f"ass='{escaped}'"
         else:
             font_size = 18 if is_shorts else 20
             margin_v = 150 if is_shorts else 58
@@ -543,20 +631,37 @@ def _burn_subtitles_and_fade(video_mp4, subtitle_path, out_mp4, is_shorts, total
                 f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00080A0E,BackColour=&H88000000,"
                 f"BorderStyle=3,Outline=2,Shadow=1,MarginV={margin_v}"
             )
-            vf_chain = f"subtitles='{escaped}':force_style='{style}',{fade_filter}"
+            sub_filter = f"subtitles='{escaped}':force_style='{style}'"
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", video_mp4,
-        "-vf", vf_chain,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "22",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-pix_fmt", "yuv420p",
-        out_mp4,
-    ]
+    if is_shorts:
+        bar_png = os.path.join(work_dir, "progress_bar.png")
+        _create_progress_bar_png(bar_png, 1080, bar_h=10)
+        base_chain = f"[0:v]{sub_filter}[vsub]" if sub_filter else "[0:v]null[vsub]"
+        fc = (
+            f"{base_chain};"
+            f"[vsub][1:v]overlay=x='-w+(w*t/{max(1.0, total_dur):.2f})':y=0:shortest=1,{fade_filter}[vout]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_mp4,
+            "-loop", "1", "-i", bar_png,
+            "-filter_complex", fc,
+            "-map", "[vout]", "-map", "0:a",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+            out_mp4,
+        ]
+    else:
+        vf_chain = f"{sub_filter},{fade_filter}" if sub_filter else fade_filter
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_mp4,
+            "-vf", vf_chain,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+            out_mp4,
+        ]
+
     _run_ffmpeg(cmd)
     return out_mp4
 
@@ -583,6 +688,7 @@ def build_final_video(
     output_video_path,
     music_direction=None,
     chosen_topic="",
+    debate_card=None,
 ):
     os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
@@ -594,7 +700,8 @@ def build_final_video(
     used_urls = set()
     subclips = []
     voice_files = []
-    sfx_events = {"whoosh": [], "pop": [], "impact": []}
+    sfx_events = {"whoosh": [], "pop": [], "impact": [], "tick": []}
+    music_drops = []
 
     article_thumb = None
     if chosen_topic:
@@ -604,12 +711,16 @@ def build_final_video(
     outro_card_png = os.path.join(work_dir, "outro_card.png")
     _create_outro_card_png(outro_card_png, width, height)
 
+    debate_card_png = os.path.join(work_dir, "debate_card.png")
+    _create_debate_card_png(debate_card_png, width, height, debate_card)
+
     total_scenes = len(scene_audio_info)
     timeline_t = 0.0
 
     for pos, sc in enumerate(scene_audio_info):
         idx = sc["index"]
         is_last_scene = (pos == total_scenes - 1)
+        itype = str(sc.get("interactive_type", "none")).strip().lower()
         v_path = sc["audio_path"]
         dur = max(1.5, float(sc["duration"]))
         query = sc.get("visual_query", "technology")
@@ -617,10 +728,18 @@ def build_final_video(
         highlight_text = sc.get("highlight_text", "") or narration
         voice_files.append(v_path)
 
+        # Record dramatic 1.8s music drop + low impact on twist scenes
+        if itype == "music_drop":
+            music_drops.append((timeline_t, min(timeline_t + 1.8, timeline_t + dur)))
+            sfx_events["impact"].append(int(timeline_t * 1000))
+
+        # Record clock-tick SFX during the 1.8s countdown suspense pause
+        if itype == "countdown" and sc.get("countdown_start") is not None:
+            sfx_events["tick"].append(int(float(sc["countdown_start"]) * 1000))
+
         if idx == 0:
             n_cuts = max(2, min(5, int(round(dur / 1.8))))
-        elif is_last_scene:
-            # Keep the outro steady (1-2 clean shots so the Outro Card stays readable)
+        elif is_last_scene or itype in ("countdown", "debate"):
             n_cuts = 1 if dur <= 7.5 else 2
         else:
             cut_target = 3.6 if is_shorts else 4.3
@@ -647,7 +766,7 @@ def build_final_video(
             is_img = False
             is_chart = False
 
-            if is_market_scene and c_i == 0 and not is_last_scene and (idx % 3 == 0):
+            if is_market_scene and c_i == 0 and not is_last_scene and itype == "none" and (idx % 3 == 0):
                 chart_mp4 = os.path.join(work_dir, f"chart_{idx:03d}.mp4")
                 try:
                     render_animated_candlestick_clip(
@@ -684,7 +803,15 @@ def build_final_video(
             if is_final_subclip:
                 overlay_png = outro_card_png
                 sfx_events["pop"].append(int(timeline_t * 1000))
-            elif (idx == 0 and c_i == 0) or (c_i == 1 and dur >= 5.5 and not is_last_scene and (idx % 3 == 0)):
+            elif itype == "debate" and c_i == n_cuts - 1:
+                overlay_png = debate_card_png
+                sfx_events["pop"].append(int(timeline_t * 1000))
+            elif itype == "countdown" and c_i == n_cuts - 1:
+                cd_p = os.path.join(work_dir, f"countdown_{idx:03d}.png")
+                _create_countdown_card_png(cd_p, width, height, highlight_text)
+                overlay_png = cd_p
+                sfx_events["pop"].append(int(timeline_t * 1000))
+            elif (idx == 0 and c_i == 0) or (c_i == 1 and dur >= 5.5 and not is_last_scene and itype == "none" and (idx % 3 == 0)):
                 card_p = os.path.join(work_dir, f"card_{idx:03d}_{c_i:02d}.png")
                 acc = "red" if bearish_flag else ("green" if is_market_scene else "gold")
                 badge = "BREAKING HOOK" if idx == 0 else ("MARKET DATA" if is_market_scene else "NEWSROOM BRIEF")
@@ -757,6 +884,7 @@ def build_final_video(
         master_wav,
         music_direction=music_direction,
         sfx_events=sfx_events,
+        music_drops=music_drops,
     )
 
     combined_mp4 = os.path.join(work_dir, "video_with_audio.mp4")
@@ -766,5 +894,5 @@ def build_final_video(
         combined_mp4,
     ])
 
-    _burn_subtitles_and_fade(combined_mp4, subtitle_path, output_video_path, is_shorts, total_dur)
+    _burn_subtitles_and_fade(combined_mp4, subtitle_path, output_video_path, is_shorts, total_dur, work_dir)
     return output_video_path
