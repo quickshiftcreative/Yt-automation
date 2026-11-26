@@ -3,6 +3,7 @@ import os
 import random
 import subprocess
 from PIL import Image, ImageDraw, ImageFont
+from config import CHANNEL_NAME
 from chart_animator import render_animated_candlestick_clip
 from media_fetcher import (
     fetch_article_image,
@@ -122,6 +123,65 @@ def _find_font(size):
             except Exception:
                 pass
     return ImageFont.load_default()
+
+
+def _draw_centered_text(draw, center_x, y, text, font, fill):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    draw.text((center_x - tw // 2, y), text, fill=fill, font=font)
+
+
+def _create_outro_card_png(out_png, width, height):
+    """Creates a clean dark-gold glassmorphism Outro Card positioned cleanly above captions."""
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    is_vertical = height > width
+
+    box_w = int(width * 0.86) if is_vertical else min(int(width * 0.62), 1080)
+    box_h = 370 if is_vertical else 310
+    x0 = (width - box_w) // 2
+    y0 = int(height * 0.22) if is_vertical else int(height * 0.17)
+    x1 = x0 + box_w
+    y1 = y0 + box_h
+    cx = width // 2
+
+    gold = (250, 204, 21, 255)
+    bg = (12, 15, 22, 236)
+    white = (248, 250, 252, 255)
+    muted = (198, 206, 220, 255)
+
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=28, fill=bg, outline=gold, width=3)
+    draw.rounded_rectangle([x0, y0, x1, y0 + 10], radius=6, fill=gold)
+
+    f_title = _find_font(48 if is_vertical else 52)
+    f_sub = _find_font(28 if is_vertical else 30)
+    f_pill = _find_font(24 if is_vertical else 26)
+
+    _draw_centered_text(draw, cx, y0 + 38, "THANK YOU FOR WATCHING", f_title, white)
+    _draw_centered_text(draw, cx, y0 + 112, (CHANNEL_NAME or "Quick Shift Creative").upper(), f_sub, gold)
+
+    # Three clean CTA pills: LIKE | SHARE | SUBSCRIBE
+    pills = ["LIKE", "SHARE", "SUBSCRIBE"]
+    pill_w = 215 if is_vertical else 240
+    pill_h = 62
+    gap = 24
+    total_pw = len(pills) * pill_w + (len(pills) - 1) * gap
+    px = cx - total_pw // 2
+    py = y0 + (190 if is_vertical else 178)
+
+    for idx_p, lbl in enumerate(pills):
+        is_sub = (idx_p == 2)
+        p_fill = gold if is_sub else (28, 34, 48, 245)
+        p_txt = (10, 12, 16, 255) if is_sub else white
+        p_out = gold if not is_sub else (255, 235, 130, 255)
+        draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=16, fill=p_fill, outline=p_out, width=2)
+        _draw_centered_text(draw, px + pill_w // 2, py + 16, lbl, f_pill, p_txt)
+        px += pill_w + gap
+
+    _draw_centered_text(draw, cx, y1 - 56, "See you in the next update", _find_font(22), muted)
+
+    canvas.save(out_png, "PNG")
+    return out_png
 
 
 def _create_newsroom_highlight_card(out_png, width, height, badge_text, headline_text, thumb_img_path=None, accent="gold"):
@@ -387,12 +447,10 @@ def _master_voice_and_music(
     _run_ffmpeg(["ffmpeg", "-y", "-i", voice_concat_mp3, "-af", v_filt, "-ar", "44100", "-ac", "2", v_master])
 
     md = music_direction or {}
-    # 1. Fetch AI-matched CC0 background music directly via Freesound API
     music_file = fetch_freesound_music(
         md.get("music_query", "ambient technology electronic loop"),
         os.path.join(work_dir, "fs_bgm.mp3"),
     )
-    # 2. Fallback to local assets/music/ folder if available
     if not music_file:
         music_file = _pick_local_music_fallback(md, mode, is_shorts, rng)
 
@@ -431,11 +489,12 @@ def _master_voice_and_music(
             m_norm,
         ])
         inputs.extend(["-i", m_norm])
-        fade_out_st = max(0.5, total_dur - 1.8)
+        fade_out_d = 2.0 if not is_shorts else 1.6
+        fade_out_st = max(0.5, total_dur - fade_out_d)
         parts.append(f"{cur_v}asplit=2[v_for_mix][v_for_sc]")
         parts.append(
             f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"atrim=0:{total_dur:.2f},afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_st:.2f}:d=1.8,"
+            f"atrim=0:{total_dur:.2f},afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_st:.2f}:d={fade_out_d:.2f},"
             f"volume={music_vol:.3f}[mbase]"
         )
         parts.append("[mbase][v_for_sc]sidechaincompress=threshold=0.025:ratio=6:attack=15:release=280[mduck]")
@@ -448,7 +507,9 @@ def _master_voice_and_music(
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_pop, events.get("pop", []), 0.6, 0.18, "pp")
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_impact, events.get("impact", []), 1.2, 0.20, "im")
 
-    parts.append(f"{cur_v}alimiter=limit=0.95[am_final]")
+    # Gentle final audio fade-out over the last 1.0s so audio never ends abruptly
+    final_afade_st = max(0.5, total_dur - 1.0)
+    parts.append(f"{cur_v}alimiter=limit=0.95,afade=t=out:st={final_afade_st:.2f}:d=1.0[am_final]")
 
     cmd = [
         "ffmpeg", "-y",
@@ -462,28 +523,32 @@ def _master_voice_and_music(
     return out_audio_wav
 
 
-def _burn_subtitles(video_mp4, subtitle_path, out_mp4, is_shorts):
-    if not subtitle_path or not os.path.exists(subtitle_path) or os.path.getsize(subtitle_path) == 0:
-        _run_ffmpeg(["ffmpeg", "-y", "-i", video_mp4, "-c", "copy", out_mp4])
-        return out_mp4
+def _burn_subtitles_and_fade(video_mp4, subtitle_path, out_mp4, is_shorts, total_dur):
+    """Burns pop captions and applies a smooth 1.2s fade-to-black at the end of every video."""
+    fade_d = 1.2
+    fade_st = max(0.2, float(total_dur) - fade_d)
+    fade_filter = f"fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}"
 
-    escaped = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
-    if subtitle_path.lower().endswith(".ass"):
-        vf_sub = f"ass='{escaped}'"
+    if not subtitle_path or not os.path.exists(subtitle_path) or os.path.getsize(subtitle_path) == 0:
+        vf_chain = fade_filter
     else:
-        font_size = 18 if is_shorts else 20
-        margin_v = 150 if is_shorts else 58
-        style = (
-            f"FontName=DejaVu Sans,FontSize={font_size},Bold=1,"
-            f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00080A0E,BackColour=&H88000000,"
-            f"BorderStyle=3,Outline=2,Shadow=1,MarginV={margin_v}"
-        )
-        vf_sub = f"subtitles='{escaped}':force_style='{style}'"
+        escaped = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
+        if subtitle_path.lower().endswith(".ass"):
+            vf_chain = f"ass='{escaped}',{fade_filter}"
+        else:
+            font_size = 18 if is_shorts else 20
+            margin_v = 150 if is_shorts else 58
+            style = (
+                f"FontName=DejaVu Sans,FontSize={font_size},Bold=1,"
+                f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00080A0E,BackColour=&H88000000,"
+                f"BorderStyle=3,Outline=2,Shadow=1,MarginV={margin_v}"
+            )
+            vf_chain = f"subtitles='{escaped}':force_style='{style}',{fade_filter}"
 
     cmd = [
         "ffmpeg", "-y",
         "-i", video_mp4,
-        "-vf", vf_sub,
+        "-vf", vf_chain,
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "22",
@@ -536,10 +601,15 @@ def build_final_video(
         art_dl = os.path.join(work_dir, "article_hero.jpg")
         article_thumb = fetch_article_image(chosen_topic, art_dl)
 
+    outro_card_png = os.path.join(work_dir, "outro_card.png")
+    _create_outro_card_png(outro_card_png, width, height)
+
+    total_scenes = len(scene_audio_info)
     timeline_t = 0.0
 
-    for sc in scene_audio_info:
+    for pos, sc in enumerate(scene_audio_info):
         idx = sc["index"]
+        is_last_scene = (pos == total_scenes - 1)
         v_path = sc["audio_path"]
         dur = max(1.5, float(sc["duration"]))
         query = sc.get("visual_query", "technology")
@@ -549,12 +619,15 @@ def build_final_video(
 
         if idx == 0:
             n_cuts = max(2, min(5, int(round(dur / 1.8))))
+        elif is_last_scene:
+            # Keep the outro steady (1-2 clean shots so the Outro Card stays readable)
+            n_cuts = 1 if dur <= 7.5 else 2
         else:
             cut_target = 3.6 if is_shorts else 4.3
             n_cuts = max(1, min(4, int(round(dur / cut_target))))
         cut_dur = dur / n_cuts
 
-        if idx > 0 and (idx % 2 == 1 or is_shorts):
+        if idx > 0 and (idx % 2 == 1 or is_shorts or is_last_scene):
             sfx_events["whoosh"].append(int(timeline_t * 1000))
 
         combined_text = narration + " " + query
@@ -569,11 +642,12 @@ def build_final_video(
 
         for c_i in range(n_cuts):
             sub_mp4 = os.path.join(work_dir, f"sub_{idx:03d}_{c_i:02d}.mp4")
+            is_final_subclip = (is_last_scene and c_i == n_cuts - 1)
             src_media = None
             is_img = False
             is_chart = False
 
-            if is_market_scene and c_i == 0 and (idx % 3 == 0):
+            if is_market_scene and c_i == 0 and not is_last_scene and (idx % 3 == 0):
                 chart_mp4 = os.path.join(work_dir, f"chart_{idx:03d}.mp4")
                 try:
                     render_animated_candlestick_clip(
@@ -592,7 +666,7 @@ def build_final_video(
                     src_media = None
 
             if not src_media:
-                if c_i % 2 == 1:
+                if c_i % 2 == 1 or is_final_subclip:
                     photo_dl = os.path.join(work_dir, f"photo_{idx:03d}_{c_i:02d}.jpg")
                     src_media = fetch_stock_image(query, photo_dl, orientation=orient, used_urls=used_urls)
                     is_img = True
@@ -607,8 +681,10 @@ def build_final_video(
                         is_img = True
 
             overlay_png = None
-            show_card = (idx == 0 and c_i == 0) or (c_i == 1 and dur >= 5.5 and (idx % 3 == 0))
-            if show_card:
+            if is_final_subclip:
+                overlay_png = outro_card_png
+                sfx_events["pop"].append(int(timeline_t * 1000))
+            elif (idx == 0 and c_i == 0) or (c_i == 1 and dur >= 5.5 and not is_last_scene and (idx % 3 == 0)):
                 card_p = os.path.join(work_dir, f"card_{idx:03d}_{c_i:02d}.png")
                 acc = "red" if bearish_flag else ("green" if is_market_scene else "gold")
                 badge = "BREAKING HOOK" if idx == 0 else ("MARKET DATA" if is_market_scene else "NEWSROOM BRIEF")
@@ -626,7 +702,7 @@ def build_final_video(
                 sfx_events["pop"].append(int(timeline_t * 1000))
 
             gif_pick = None
-            if not overlay_png and c_i == 0 and idx > 0 and (idx % 5 == 2):
+            if not overlay_png and not is_last_scene and c_i == 0 and idx > 0 and (idx % 5 == 2):
                 g_q = _gif_query_for_scene(narration, mode, bearish_flag, is_market_scene)
                 gif_dl = os.path.join(work_dir, f"giphy_{idx:03d}.gif")
                 gif_pick = fetch_giphy_sticker(g_q, gif_dl)
@@ -690,5 +766,5 @@ def build_final_video(
         combined_mp4,
     ])
 
-    _burn_subtitles(combined_mp4, subtitle_path, output_video_path, is_shorts)
+    _burn_subtitles_and_fade(combined_mp4, subtitle_path, output_video_path, is_shorts, total_dur)
     return output_video_path
