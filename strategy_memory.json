@@ -1,144 +1,163 @@
 {
-  "shorts_score": 157.43,
-  "long_score": 1.78,
+  "shorts_score": 166.53,
+  "long_score": 4.11,
   "winning_topics": [
-    "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
     "California Sues OpenAI Over Safety",
+    "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
     "How GTA 6 Uses Real Drivers for Perfect Handling",
     "GTA 6 Viral Chaos and Career Gambles",
-    "Nvidia vs Intel: The AI Stock Trap"
+    "Nvidia's Credit Warning Explained"
   ],
   "avoid_patterns": [
     "generic filler intros",
     "repetitive stock loops"
   ],
   "winning_title_patterns": [
-    "specific_number",
     "direct_statement",
+    "specific_number",
     "curiosity_contrast"
   ],
   "winning_keywords": [
+    "california lawsuit",
     "gta 6 jason",
     "gta 6 protagonist",
     "gta vi",
     "gaming trends",
-    "grand theft auto 6",
-    "california lawsuit",
     "rockstargames",
     "techtrends",
     "gta6",
-    "gamingnews"
+    "gamingnews",
+    "grandtheftauto"
   ],
   "recent_viewer_comments": [],
   "healed_video_ids": [],
   "golden_hour_shorts_et": 19,
-  "golden_hour_long_et": 20,
+  "golden_hour_long_et": 4,
   "top_hours_shorts_et": [
     19,
     20,
-    0,
     21,
     18,
-    16
+    16,
+    22
   ],
   "top_hours_long_et": [
+    4,
     20,
     19,
-    21,
     14
   ],
   "hourly_stats": {
     "shorts": {
+      "12": {
+        "count": 2,
+        "avg_views": 8.0,
+        "avg_reach": 40.62
+      },
       "8": {
         "count": 2,
-        "avg_views": 47.5,
-        "avg_reach": 91.37
+        "avg_views": 51.0,
+        "avg_reach": 109.79
       },
       "23": {
         "count": 1,
-        "avg_views": 24.0,
-        "avg_reach": 140.51
+        "avg_views": 73.0,
+        "avg_reach": 366.83
       },
       "19": {
         "count": 3,
-        "avg_views": 528.0,
-        "avg_reach": 953.17
+        "avg_views": 603.7,
+        "avg_reach": 1148.8
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 9.6
+        "avg_reach": 8.63
       },
       "9": {
         "count": 2,
-        "avg_views": 52.5,
-        "avg_reach": 106.08
+        "avg_views": 54.5,
+        "avg_reach": 103.86
       },
       "0": {
         "count": 1,
-        "avg_views": 333.0,
-        "avg_reach": 628.0
+        "avg_views": 335.0,
+        "avg_reach": 601.29
       },
       "10": {
         "count": 1,
         "avg_views": 41.0,
-        "avg_reach": 73.9
+        "avg_reach": 71.41
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 13.44
+        "avg_reach": 13.2
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 6.7
-      },
-      "12": {
-        "count": 1,
-        "avg_views": 11.0,
-        "avg_reach": 23.16
+        "avg_reach": 6.58
       }
     },
     "long": {
       "4": {
         "count": 3,
-        "avg_views": 2.0,
-        "avg_reach": 9.7
+        "avg_views": 8.7,
+        "avg_reach": 46.73
       },
       "21": {
         "count": 2,
-        "avg_views": 1.5,
-        "avg_reach": 8.25
+        "avg_views": 2.0,
+        "avg_reach": 8.32
       },
       "22": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 6.72
+        "avg_reach": 6.39
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.44
+        "avg_reach": 1.4
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.51
+        "avg_reach": 4.43
       }
     }
   },
-  "scheduled_slots": {},
+  "scheduled_slots": {
+    "2026-11-26": [
+      {
+        "hour_et": 19,
+        "format": "shorts",
+        "publish_at_utc": "2026-11-27T00:15:00Z"
+      }
+    ]
+  },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 0,
+    "total_recorded": 1,
     "winning_font": "Anton",
     "winning_layout": "mrbeast_bottom_slam",
     "font_stats": {},
     "layout_stats": {},
-    "records": {}
+    "records": {
+      "TDueM8_uOLE": {
+        "font": "Bangers",
+        "layout": "mrbeast_bottom_slam",
+        "accent": "red",
+        "topic": "Nvidia AI Chip Restrictions and AI Bubble Risks",
+        "is_shorts": true,
+        "uploaded_utc": "2026-11-26T22:04:23Z",
+        "views": 0,
+        "ctr_proxy": null
+      }
+    }
   },
-  "last_updated_utc": "2026-11-26T17:40:00Z",
+  "last_updated_utc": "2026-11-26T21:54:24Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
