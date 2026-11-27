@@ -1,12 +1,12 @@
 {
-  "shorts_score": 165.18,
-  "long_score": 5.67,
+  "shorts_score": 174.35,
+  "long_score": 5.2,
   "winning_topics": [
     "California Sues OpenAI Over Safety",
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
     "How GTA 6 Uses Real Drivers for Perfect Handling",
-    "GTA 6 Viral Chaos and Career Gambles",
-    "Nvidia's Credit Warning Explained"
+    "Nvidia's Credit Warning Explained",
+    "GTA 6 Viral Chaos and Career Gambles"
   ],
   "avoid_patterns": [
     "generic filler intros",
@@ -15,7 +15,7 @@
   "winning_title_patterns": [
     "direct_statement",
     "specific_number",
-    "curiosity_contrast"
+    "curiosity_question"
   ],
   "winning_keywords": [
     "california lawsuit",
@@ -25,9 +25,9 @@
     "gaming trends",
     "rockstargames",
     "techtrends",
+    "ai safety",
     "gta6",
-    "gamingnews",
-    "ai safety"
+    "gamingnews"
   ],
   "recent_viewer_comments": [],
   "healed_video_ids": [],
@@ -37,9 +37,9 @@
     19,
     21,
     18,
+    23,
     16,
-    22,
-    13
+    22
   ],
   "top_hours_long_et": [
     4,
@@ -51,85 +51,85 @@
     "shorts": {
       "20": {
         "count": 1,
-        "avg_views": 0.0,
-        "avg_reach": 0.0
+        "avg_views": 2.0,
+        "avg_reach": 14.19
       },
       "19": {
         "count": 4,
-        "avg_views": 516.8,
-        "avg_reach": 979.94
+        "avg_views": 547.2,
+        "avg_reach": 1045.29
       },
       "12": {
         "count": 2,
-        "avg_views": 8.0,
-        "avg_reach": 30.61
+        "avg_views": 8.5,
+        "avg_reach": 31.81
       },
       "8": {
         "count": 2,
-        "avg_views": 54.0,
-        "avg_reach": 107.51
+        "avg_views": 55.0,
+        "avg_reach": 106.35
       },
       "23": {
         "count": 1,
-        "avg_views": 116.0,
-        "avg_reach": 521.48
+        "avg_views": 144.0,
+        "avg_reach": 584.01
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 7.94
+        "avg_reach": 7.68
       },
       "9": {
         "count": 2,
-        "avg_views": 56.5,
-        "avg_reach": 102.58
+        "avg_views": 57.0,
+        "avg_reach": 101.45
       },
       "0": {
         "count": 1,
         "avg_views": 336.0,
-        "avg_reach": 578.64
+        "avg_reach": 568.68
       },
       "10": {
         "count": 1,
         "avg_views": 41.0,
-        "avg_reach": 69.31
+        "avg_reach": 68.43
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 12.99
+        "avg_reach": 12.89
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 6.47
+        "avg_reach": 6.43
       }
     },
     "long": {
+      "21": {
+        "count": 3,
+        "avg_views": 1.3,
+        "avg_reach": 4.89
+      },
       "4": {
         "count": 3,
-        "avg_views": 13.3,
-        "avg_reach": 50.87
-      },
-      "21": {
-        "count": 2,
-        "avg_views": 2.0,
-        "avg_reach": 7.61
+        "avg_views": 13.7,
+        "avg_reach": 49.33
       },
       "22": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 6.11
+        "avg_reach": 6.0
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.36
+        "avg_reach": 1.35
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.36
+        "avg_reach": 4.33
       }
     }
   },
@@ -149,21 +149,31 @@
         "hour_et": 21,
         "format": "long",
         "publish_at_utc": "2026-11-27T02:45:00Z"
+      },
+      {
+        "hour_et": 23,
+        "format": "shorts",
+        "publish_at_utc": "2026-11-27T04:45:00Z"
       }
     ]
   },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 3,
+    "total_recorded": 4,
     "winning_font": "Bangers",
     "winning_layout": "mrbeast_bottom_slam",
     "font_stats": {
       "Bangers": {
         "count": 1,
-        "avg_ctr_proxy": 0.16,
-        "avg_views": 9.0
+        "avg_ctr_proxy": 0.414,
+        "avg_views": 29.0
       },
       "Poppins Black": {
+        "count": 1,
+        "avg_ctr_proxy": 0.03,
+        "avg_views": 2.0
+      },
+      "Oswald": {
         "count": 1,
         "avg_ctr_proxy": 0.0,
         "avg_views": 0.0
@@ -172,10 +182,15 @@
     "layout_stats": {
       "mrbeast_bottom_slam": {
         "count": 1,
-        "avg_ctr_proxy": 0.16,
-        "avg_views": 9.0
+        "avg_ctr_proxy": 0.414,
+        "avg_views": 29.0
       },
       "youtube_clean_pro": {
+        "count": 1,
+        "avg_ctr_proxy": 0.03,
+        "avg_views": 2.0
+      },
+      "top_focus_frame": {
         "count": 1,
         "avg_ctr_proxy": 0.0,
         "avg_views": 0.0
@@ -189,8 +204,8 @@
         "topic": "Nvidia AI Chip Restrictions and AI Bubble Risks",
         "is_shorts": true,
         "uploaded_utc": "2026-11-26T22:04:23Z",
-        "views": 9,
-        "ctr_proxy": 0.16
+        "views": 29,
+        "ctr_proxy": 0.414
       },
       "rb0izYGOOko": {
         "font": "Poppins Black",
@@ -199,8 +214,8 @@
         "topic": "Grand Theft Boston AI Parody",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T00:06:07Z",
-        "views": 0,
-        "ctr_proxy": 0.0
+        "views": 2,
+        "ctr_proxy": 0.03
       },
       "4iMi3mW0qy8": {
         "font": "Oswald",
@@ -210,11 +225,21 @@
         "is_shorts": false,
         "uploaded_utc": "2026-11-27T02:09:31Z",
         "views": 0,
+        "ctr_proxy": 0.0
+      },
+      "vz_JK9KKjfU": {
+        "font": "Bebas Neue",
+        "layout": "split_left_editorial",
+        "accent": "cyan",
+        "topic": "GTA Boston AI Parody & Local News Buzz",
+        "is_shorts": true,
+        "uploaded_utc": "2026-11-27T03:51:02Z",
+        "views": 0,
         "ctr_proxy": null
       }
     }
   },
-  "last_updated_utc": "2026-11-27T01:56:26Z",
+  "last_updated_utc": "2026-11-27T03:47:25Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
