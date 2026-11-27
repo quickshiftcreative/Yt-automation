@@ -1,38 +1,40 @@
 {
-  "shorts_score": 186.33,
-  "long_score": 5.7,
+  "shorts_score": 209.11,
+  "long_score": 6.45,
   "winning_topics": [
     "California Sues OpenAI Over Safety",
+    "Nvidia's AI Ban & Trump News Today: Market Bubble Alert?",
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
     "How GTA 6 Uses Real Drivers for Perfect Handling",
-    "Nvidia's Credit Warning Explained",
-    "GTA 6 Viral Chaos and Career Gambles"
+    "Nvidia's Credit Warning Explained"
   ],
   "avoid_patterns": [
     "generic filler intros",
     "repetitive stock loops"
   ],
   "winning_title_patterns": [
-    "direct_statement",
-    "specific_number",
-    "curiosity_question"
+    "curiosity_question",
+    "urgent_breaking",
+    "direct_statement"
   ],
   "winning_keywords": [
+    "china trade",
+    "gpu prices",
+    "tech trends",
     "california lawsuit",
-    "gta 6 jason",
-    "gta 6 protagonist",
     "gta vi",
-    "gaming trends",
     "rockstargames",
-    "techtrends",
-    "ai safety",
-    "gta6",
-    "gamingnews"
+    "tech stocks",
+    "ai bubble",
+    "market news",
+    "nasdaq"
   ],
   "recent_viewer_comments": [],
   "healed_video_ids": [
+    "4iMi3mW0qy8",
     "vz_JK9KKjfU",
-    "4iMi3mW0qy8"
+    "cGp92koOp_A",
+    "rb0izYGOOko"
   ],
   "best_long_video_id": "dYRXflwqBKs",
   "endscreen_picks": {
@@ -49,7 +51,7 @@
   },
   "last_branding_sync_utc": "2026-11-27T13:40:56Z",
   "golden_hour_shorts_et": 19,
-  "golden_hour_long_et": 4,
+  "golden_hour_long_et": 10,
   "top_hours_shorts_et": [
     19,
     23,
@@ -59,94 +61,99 @@
     22
   ],
   "top_hours_long_et": [
-    4,
+    10,
     20,
     19,
     14
   ],
   "hourly_stats": {
     "shorts": {
+      "10": {
+        "count": 2,
+        "avg_views": 24.0,
+        "avg_reach": 64.42
+      },
       "23": {
         "count": 2,
-        "avg_views": 160.5,
-        "avg_reach": 511.45
+        "avg_views": 239.0,
+        "avg_reach": 644.94
       },
       "20": {
         "count": 1,
-        "avg_views": 21.0,
-        "avg_reach": 89.37
+        "avg_views": 38.0,
+        "avg_reach": 105.99
       },
       "19": {
         "count": 4,
-        "avg_views": 592.2,
-        "avg_reach": 1033.6
+        "avg_views": 699.5,
+        "avg_reach": 1238.15
       },
       "12": {
         "count": 2,
-        "avg_views": 8.5,
-        "avg_reach": 24.84
+        "avg_views": 9.0,
+        "avg_reach": 24.26
       },
       "8": {
         "count": 2,
-        "avg_views": 60.5,
-        "avg_reach": 104.27
+        "avg_views": 64.0,
+        "avg_reach": 102.89
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 6.64
+        "avg_reach": 6.07
       },
       "9": {
         "count": 2,
-        "avg_views": 58.5,
-        "avg_reach": 95.22
+        "avg_views": 59.0,
+        "avg_reach": 90.74
       },
       "0": {
         "count": 1,
         "avg_views": 336.0,
-        "avg_reach": 524.79
-      },
-      "10": {
-        "count": 1,
-        "avg_views": 41.0,
-        "avg_reach": 64.37
+        "avg_reach": 497.85
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 12.44
+        "avg_reach": 12.11
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 6.2
+        "avg_reach": 6.04
       }
     },
     "long": {
+      "10": {
+        "count": 1,
+        "avg_views": 10.0,
+        "avg_reach": 91.57
+      },
       "21": {
         "count": 3,
-        "avg_views": 2.7,
-        "avg_reach": 12.93
+        "avg_views": 3.7,
+        "avg_reach": 14.2
       },
       "4": {
         "count": 3,
         "avg_views": 14.0,
-        "avg_reach": 41.21
+        "avg_reach": 36.93
       },
       "22": {
         "count": 1,
-        "avg_views": 2.0,
-        "avg_reach": 5.5
+        "avg_views": 3.0,
+        "avg_reach": 7.79
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.28
+        "avg_reach": 1.23
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.17
+        "avg_reach": 4.06
       }
     }
   },
@@ -156,34 +163,44 @@
         "hour_et": 13,
         "format": "shorts",
         "publish_at_utc": "2026-11-27T18:15:00Z"
+      },
+      {
+        "hour_et": 19,
+        "format": "shorts",
+        "publish_at_utc": "2026-11-28T00:15:00Z"
       }
     ]
   },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 5,
-    "winning_font": "Oswald",
+    "total_recorded": 6,
+    "winning_font": "Bangers",
     "winning_layout": "mrbeast_top_boom",
     "font_stats": {
       "Bangers": {
         "count": 1,
-        "avg_ctr_proxy": 0.588,
-        "avg_views": 77.0
+        "avg_ctr_proxy": 2.741,
+        "avg_views": 508.0
       },
       "Poppins Black": {
         "count": 1,
-        "avg_ctr_proxy": 0.164,
-        "avg_views": 21.0
+        "avg_ctr_proxy": 0.209,
+        "avg_views": 38.0
       },
       "Oswald": {
         "count": 1,
-        "avg_ctr_proxy": 0.957,
-        "avg_views": 4.0
+        "avg_ctr_proxy": 1.112,
+        "avg_views": 6.0
       },
       "Bebas Neue": {
         "count": 1,
-        "avg_ctr_proxy": 0.829,
-        "avg_views": 100.0
+        "avg_ctr_proxy": 1.248,
+        "avg_views": 217.0
+      },
+      "Anton": {
+        "count": 1,
+        "avg_ctr_proxy": 0.08,
+        "avg_views": 7.0
       }
     },
     "layout_stats": {},
@@ -195,8 +212,8 @@
         "topic": "Nvidia AI Chip Restrictions and AI Bubble Risks",
         "is_shorts": true,
         "uploaded_utc": "2026-11-26T22:04:23Z",
-        "views": 77,
-        "ctr_proxy": 0.588
+        "views": 508,
+        "ctr_proxy": 2.741
       },
       "rb0izYGOOko": {
         "font": "Poppins Black",
@@ -205,8 +222,8 @@
         "topic": "Grand Theft Boston AI Parody",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T00:06:07Z",
-        "views": 21,
-        "ctr_proxy": 0.164
+        "views": 38,
+        "ctr_proxy": 0.209
       },
       "4iMi3mW0qy8": {
         "font": "Oswald",
@@ -215,8 +232,8 @@
         "topic": "Trump Economic Claims & Nvidia China GPU Restrictions",
         "is_shorts": false,
         "uploaded_utc": "2026-11-27T02:09:31Z",
-        "views": 4,
-        "ctr_proxy": 0.957
+        "views": 6,
+        "ctr_proxy": 1.112
       },
       "vz_JK9KKjfU": {
         "font": "Bebas Neue",
@@ -225,8 +242,8 @@
         "topic": "GTA Boston AI Parody & Local News Buzz",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T03:51:02Z",
-        "views": 100,
-        "ctr_proxy": 0.829
+        "views": 217,
+        "ctr_proxy": 1.248
       },
       "6sg1g72WpBI": {
         "font": "Anton",
@@ -235,12 +252,22 @@
         "topic": "The Best AI Stocks to Buy Now vs Global Memory Shortage",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T13:14:09Z",
+        "views": 7,
+        "ctr_proxy": 0.08
+      },
+      "ysi9Vb_ieE8": {
+        "font": "Lilita One",
+        "layout": "upper_left_hero",
+        "accent": "green",
+        "topic": "Nvidia Blackwell Chips & Trump AI Task Force",
+        "is_shorts": true,
+        "uploaded_utc": "2026-11-27T21:39:50Z",
         "views": 0,
         "ctr_proxy": null
       }
     }
   },
-  "last_updated_utc": "2026-11-27T13:40:52Z",
+  "last_updated_utc": "2026-11-27T21:36:46Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
