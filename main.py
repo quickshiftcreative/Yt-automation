@@ -16,6 +16,7 @@ from youtube_uploader import (
     upload_video_with_thumbnail,
 )
 from learning_engine import (
+    get_endscreen_pair,
     load_strategy_memory,
     mark_channel_branding_synced,
     pick_smart_publish_time,
@@ -59,6 +60,22 @@ def _build_chapters_text(beat_audio_info):
     return "\n".join(lines) + "\n"
 
 
+def _build_watch_next_text(endscreen_pair):
+    """Creates clickable Watch Next links for the 2 End-Screen videos (1 Top + 1 Boost)."""
+    if not endscreen_pair:
+        return ""
+    lines = []
+    top_v = endscreen_pair.get("top")
+    boost_v = endscreen_pair.get("boost")
+    if top_v and top_v.get("id"):
+        lines.append(f"Top Breakdown: {top_v.get('title', 'Watch Now')} -> https://youtu.be/{top_v['id']}")
+    if boost_v and boost_v.get("id"):
+        lines.append(f"Don't Miss This: {boost_v.get('title', 'Watch Now')} -> https://youtu.be/{boost_v['id']}")
+    if not lines:
+        return ""
+    return "\nWatch Next:\n" + "\n".join(lines) + "\n"
+
+
 def _fetch_real_topic_thumbnail_bg(chosen_topic, fallback_query, work_dir):
     real_path = os.path.join(work_dir, "thumb_real_topic.jpg")
     if chosen_topic:
@@ -88,7 +105,7 @@ def run_pipeline():
     mem = update_strategy_from_youtube(youtube_service=youtube)
     run_48h_seo_self_healing(youtube_service=youtube, gemini_api_key=GEMINI_API_KEY)
 
-    # Auto-optimize Channel SEO Description, US Keywords & Channel Trailer once every 7 days
+    # Sync Channel Branding once every 7 days: Country = IN (Monetization Safe) + Language = en-US
     if should_sync_channel_branding():
         if sync_channel_branding(
             youtube,
@@ -116,11 +133,18 @@ def run_pipeline():
     )
     print(f"[Pipeline] Total voiceover duration: {total_duration:.2f}s")
 
+    endscreen_pair = get_endscreen_pair() if active_format != "shorts" else {}
+
     final_desc = str(blueprint.get("description", "")).strip()
     if active_format != "shorts":
+        watch_next_txt = _build_watch_next_text(endscreen_pair)
+        if watch_next_txt:
+            final_desc = f"{final_desc}\n{watch_next_txt}"
+            print(f"[EndScreen] Added clickable Watch Next links:{watch_next_txt.strip()}")
         chapters_txt = _build_chapters_text(beat_audio_info)
         if chapters_txt and "00:00" not in final_desc:
             final_desc = f"{final_desc}\n{chapters_txt}"
+
     if "#" not in final_desc:
         default_tags = "#Shorts #TechNews #AINews #QuickShiftCreative" if active_format == "shorts" else "#TechNews #AINews #Markets #QuickShiftCreative"
         final_desc = f"{final_desc}\n\n{default_tags}"
@@ -159,6 +183,7 @@ def run_pipeline():
         music_direction=blueprint.get("music_direction", {}),
         chosen_topic=chosen_topic,
         debate_card=blueprint.get("debate_card", {}),
+        endscreen_videos=endscreen_pair,
     )
 
     privacy = os.getenv("PRIVACY_STATUS", "unlisted").strip().lower()
