@@ -1,3 +1,5 @@
+import base64
+import io
 import math
 import os
 import re
@@ -5,9 +7,9 @@ import requests
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
+BICUBIC = getattr(Image, "Resampling", Image).BICUBIC
 FONT_CACHE_DIR = "/tmp/yt_thumb_fonts"
 
-# 6 Trending High-CTR YouTube Fonts (including MrBeast-style chunky & YouTube Sans-like geometric bold)
 TRENDING_FONTS = {
     "Anton": {
         "google_css": "Anton",
@@ -36,11 +38,45 @@ TRENDING_FONTS = {
 }
 
 ACCENT_PALETTES = {
-    "gold":  ((255, 230, 0),   (255, 175, 0)),    # Curiosity / Tech / Viral
-    "green": ((0, 255, 136),   (0, 185, 95)),     # Money / Market Gains / High-RPM
-    "red":   ((255, 42, 60),   (195, 18, 36)),    # Scandal / Crash / Warning
-    "cyan":  ((0, 229, 255),   (0, 145, 255)),    # AI / Future / Gaming Hardware
+    "gold":  ((255, 230, 0),   (255, 160, 0)),
+    "green": ((0, 255, 136),   (0, 180, 90)),
+    "red":   ((255, 42, 60),   (190, 15, 35)),
+    "cyan":  ((0, 229, 255),   (0, 140, 255)),
 }
+
+
+def _try_gemini_studio_bg(topic_prompt, gemini_api_key, width=1280, height=720):
+    """Attempts to generate a clean, photorealistic, text-free MrBeast-style visual via Gemini Image API."""
+    if not topic_prompt or not gemini_api_key:
+        return None
+
+    full_prompt = (
+        f"{topic_prompt}. Photorealistic ultra-sharp 16:9 YouTube thumbnail photography, "
+        f"vivid high-contrast MrBeast studio lighting, crisp central focal subject in the lower-middle, "
+        f"clean uncluttered dark/atmospheric space at the top third. STRICTLY NO text, NO words, NO letters, NO watermarks."
+    )
+    for model in ("gemini-3.1-flash-image", "gemini-3.1-flash-lite-image", "gemini-2.5-flash-image"):
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {"responseModalities": ["IMAGE"]},
+            }
+            r = requests.post(url, json=payload, timeout=35)
+            if r.status_code != 200:
+                continue
+            parts = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            for p in parts:
+                idata = p.get("inlineData") or p.get("inline_data")
+                if idata and idata.get("data"):
+                    raw_bytes = base64.b64decode(idata["data"])
+                    im = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+                    if im.width >= 512 and im.height >= 288:
+                        print(f"[Thumbnail] Generated custom photorealistic backdrop via {model}!")
+                        return im
+        except Exception:
+            continue
+    return None
 
 
 def _download_google_font(font_name):
@@ -59,10 +95,8 @@ def _download_google_font(font_name):
     if not meta:
         return None
 
-    # Method 1: Google Fonts CSS v1 returns direct .ttf URLs for non-browser User-Agents
     try:
-        css_url = f"https://fonts.googleapis.com/css?family={meta['google_css']}"
-        r = requests.get(css_url, headers={"User-Agent": "curl/7.81.0"}, timeout=12)
+        r = requests.get(f"https://fonts.googleapis.com/css?family={meta['google_css']}", headers={"User-Agent": "curl/7.81.0"}, timeout=12)
         if r.status_code == 200:
             m = re.search(r"url\((https://[^)]+\.ttf)\)", r.text)
             if m:
@@ -75,7 +109,6 @@ def _download_google_font(font_name):
     except Exception:
         pass
 
-    # Method 2: Direct Google Fonts GitHub raw TTF fallback
     try:
         fr = requests.get(meta["github_raw"], timeout=15)
         if fr.status_code == 200 and len(fr.content) > 10000:
@@ -96,7 +129,6 @@ def _load_font(font_name, size):
             return ImageFont.truetype(ttf_path, size)
         except Exception:
             pass
-
     for sys_f in (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -109,195 +141,194 @@ def _load_font(font_name, size):
     return ImageFont.load_default()
 
 
-def _polish_mrbeast_background(bg_image_path, width=1280, height=720, focus_right=False):
-    """Polishes the real topic image with MrBeast-style vibrancy, crispness, spotlight & dramatic vignette."""
-    if bg_image_path and os.path.exists(bg_image_path):
+def _polish_photo_background(pil_or_path, width=1280, height=720, focus_right=False):
+    if isinstance(pil_or_path, Image.Image):
+        img = pil_or_path.convert("RGB")
+    elif pil_or_path and os.path.exists(pil_or_path):
         try:
-            img = Image.open(bg_image_path).convert("RGB")
+            img = Image.open(pil_or_path).convert("RGB")
         except Exception:
             img = Image.new("RGB", (width, height), (14, 18, 28))
     else:
         img = Image.new("RGB", (width, height), (14, 18, 28))
 
-    # Smart aspect-ratio crop to 1280x720
     src_ratio = img.width / max(1, img.height)
     tgt_ratio = width / height
     if src_ratio > tgt_ratio:
         new_w = int(img.height * tgt_ratio)
-        left = int((img.width - new_w) * (0.35 if focus_right else 0.5))
+        left = int((img.width - new_w) * (0.30 if focus_right else 0.50))
         img = img.crop((left, 0, left + new_w, img.height))
     else:
         new_h = int(img.width / tgt_ratio)
-        top = max(0, int((img.height - new_h) * 0.28))  # Keep faces/subjects in upper-center
+        top = max(0, int((img.height - new_h) * 0.35))
         img = img.crop((0, top, img.width, top + new_h))
 
     img = img.resize((width, height), LANCZOS)
+    # High-impact MrBeast vibrancy, clarity & studio contrast
+    img = ImageEnhance.Color(img).enhance(1.36)
+    img = ImageEnhance.Contrast(img).enhance(1.24)
+    img = ImageEnhance.Sharpness(img).enhance(1.50)
+    img = ImageEnhance.Brightness(img).enhance(1.05)
 
-    # High-CTR color & clarity polish (vibrant, crisp, never muddy)
-    img = ImageEnhance.Color(img).enhance(1.32)
-    img = ImageEnhance.Contrast(img).enhance(1.22)
-    img = ImageEnhance.Sharpness(img).enhance(1.45)
-    img = ImageEnhance.Brightness(img).enhance(1.04)
-
-    # Subtle radial center/subject spotlight + dramatic dark vignette on edges
     rgba = img.convert("RGBA")
+    # Soft dark edge vignette so focal subject pops
     vignette = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    v_draw = ImageDraw.Draw(vignette)
-    cx = int(width * (0.68 if focus_right else 0.50))
-    cy = int(height * 0.42)
-    max_r = int(math.hypot(width, height) * 0.62)
-
-    for step in range(20):
-        frac = step / 20.0
-        r_out = int(max_r * (1.0 - frac * 0.58))
-        alpha = int(125 * ((1.0 - frac) ** 1.8))
+    vd = ImageDraw.Draw(vignette)
+    cx = int(width * (0.70 if focus_right else 0.50))
+    cy = int(height * 0.56)
+    max_r = int(math.hypot(width, height) * 0.60)
+    for step in range(18):
+        frac = step / 18.0
+        r_out = int(max_r * (1.0 - frac * 0.52))
+        alpha = int(115 * ((1.0 - frac) ** 1.8))
         if alpha > 0 and r_out > 40:
-            v_draw.ellipse([cx - r_out, cy - r_out, cx + r_out, cy + r_out], outline=(4, 6, 12, alpha), width=36)
-
-    vignette = vignette.filter(ImageFilter.GaussianBlur(radius=32))
-    rgba = Image.alpha_composite(rgba, vignette)
-    return rgba
+            vd.ellipse([cx - r_out, cy - r_out, cx + r_out, cy + r_out], outline=(4, 6, 12, alpha), width=36)
+    vignette = vignette.filter(ImageFilter.GaussianBlur(radius=30))
+    return Image.alpha_composite(rgba, vignette)
 
 
-def _add_gradient_scrim(rgba, direction="bottom", strength=230):
-    """Adds a silky dark gradient scrim so bold typography always pops with maximum mobile readability."""
+def _add_scrim(rgba, direction="top", strength=215):
     w, h = rgba.size
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    if direction == "bottom":
-        start_y = int(h * 0.38)
-        span = max(1, h - start_y)
-        for y in range(start_y, h):
-            p = (y - start_y) / span
-            a = int(strength * (p ** 1.45))
-            draw.line([(0, y), (w, y)], fill=(6, 8, 14, a))
-    elif direction == "left":
-        end_x = int(w * 0.68)
-        for x in range(0, end_x):
-            p = 1.0 - (x / max(1, end_x))
-            a = int(strength * (p ** 1.25))
-            draw.line([(x, 0), (x, h)], fill=(7, 9, 16, a))
-    elif direction == "top":
-        end_y = int(h * 0.52)
+    ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(ov)
+    if direction == "top":
+        end_y = int(h * 0.48)
         for y in range(0, end_y):
             p = 1.0 - (y / max(1, end_y))
-            a = int(strength * (p ** 1.45))
-            draw.line([(0, y), (w, y)], fill=(6, 8, 14, a))
+            draw.line([(0, y), (w, y)], fill=(5, 7, 13, int(strength * (p ** 1.35))))
+    elif direction == "left":
+        end_x = int(w * 0.62)
+        for x in range(0, end_x):
+            p = 1.0 - (x / max(1, end_x))
+            draw.line([(x, 0), (x, h)], fill=(6, 8, 15, int(strength * (p ** 1.2))))
+    return Image.alpha_composite(rgba, ov)
 
-    return Image.alpha_composite(rgba, overlay)
 
-
-def _add_rim_glow(rgba, accent_rgb, position="center_right"):
-    """Adds a vibrant MrBeast-style subtle color rim glow behind the focal area."""
+def _add_glow_spot(rgba, accent_rgb, cx, cy, rx=300, ry=240, alpha=60):
     w, h = rgba.size
     glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow)
     r, g, b = accent_rgb
-
-    if position == "center_right":
-        cx, cy = int(w * 0.74), int(h * 0.48)
-    elif position == "bottom":
-        cx, cy = int(w * 0.50), int(h * 0.82)
-    else:
-        cx, cy = int(w * 0.50), int(h * 0.45)
-
-    gd.ellipse([cx - 320, cy - 260, cx + 320, cy + 260], fill=(r, g, b, 52))
-    glow = glow.filter(ImageFilter.GaussianBlur(radius=95))
+    ImageDraw.Draw(glow).ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=(r, g, b, alpha))
+    glow = glow.filter(ImageFilter.GaussianBlur(radius=85))
     return Image.alpha_composite(rgba, glow)
 
 
-def _punchy_words(headline, max_words=4):
-    """Trims long headlines to ultra-readable 2-4 power words (zero clutter, topic-accurate)."""
-    clean = re.sub(r"[#*|`~\"']", "", str(headline or "MAJOR SHIFT")).strip().upper()
+def _draw_mrbeast_arrow(rgba, start_pt, end_pt, color_rgb=(255, 42, 60)):
+    """Draws a chunky, bold YouTube-creator pointing arrow with black outline & glow."""
+    layer = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    x0, y0 = start_pt
+    x1, y1 = end_pt
+    ang = math.atan2(y1 - y0, x1 - x0)
+
+    # Thick black outline shaft + bright inner shaft
+    draw.line([(x0, y0), (x1, y1)], fill=(0, 0, 0, 235), width=26)
+    draw.line([(x0, y0), (x1, y1)], fill=(*color_rgb, 255), width=14)
+
+    # Chunky arrowhead triangle
+    head_len = 48
+    p1 = (x1 + int(math.cos(ang) * 10), y1 + int(math.sin(ang) * 10))
+    p2 = (x1 - int(math.cos(ang - 0.55) * head_len), y1 - int(math.sin(ang - 0.55) * head_len))
+    p3 = (x1 - int(math.cos(ang + 0.55) * head_len), y1 - int(math.sin(ang + 0.55) * head_len))
+
+    # Outline triangle slightly expanded
+    draw.polygon([p1, p2, p3], fill=(*color_rgb, 255), outline=(0, 0, 0, 245))
+    draw.line([p1, p2, p3, p1], fill=(0, 0, 0, 245), width=6)
+    return Image.alpha_composite(rgba, layer)
+
+
+def _draw_focus_ring(rgba, cx, cy, radius=110, color_rgb=(255, 42, 60)):
+    """Draws a subtle glowing focal target ring around the key subject (classic viral YouTube cue)."""
+    glow = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse(
+        [cx - radius, cy - radius, cx + radius, cy + radius],
+        outline=(*color_rgb, 180),
+        width=18,
+    )
+    glow = glow.filter(ImageFilter.GaussianBlur(radius=14))
+    rgba = Image.alpha_composite(rgba, glow)
+
+    ring = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+    ImageDraw.Draw(ring).ellipse(
+        [cx - radius, cy - radius, cx + radius, cy + radius],
+        outline=(*color_rgb, 245),
+        width=9,
+    )
+    return Image.alpha_composite(rgba, ring)
+
+
+def _punchy_words(headline, max_words=3):
+    clean = re.sub(r"[#*|`~\"']", "", str(headline or "BIG SHIFT")).strip().upper()
     words = [w for w in clean.split() if w]
     if not words:
         return ["BIG", "SHIFT"]
-    if len(words) <= max_words:
-        return words
-    # Prefer keeping numbers/tickers/strong nouns
     return words[:max_words]
 
 
 def _pick_power_word_index(words):
-    """Highlights the highest-impact word (number, $, %, or final punch word) in bright accent color."""
     for i, w in enumerate(words):
         if re.search(r"[\d$%?]", w):
             return i
     return len(words) - 1
 
 
-def _split_into_lines(words, max_lines=2):
-    if len(words) <= 2 or max_lines == 1:
-        return [words]
-    mid = max(1, len(words) // 2)
-    return [words[:mid], words[mid:]]
+def _render_tilted_3d_headline(width, lines, font_name, accent_rgb, max_text_w=1120, tilt_deg=-2.5, start_sz=148, align="center"):
+    """Renders massive, crisp 3D-extruded headline text onto a transparent RGBA layer with slight human tilt."""
+    tmp = Image.new("RGBA", (width, 420), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tmp)
 
+    font, sz = _load_font(font_name, 72), 72
+    for try_sz in range(start_sz, 64, -4):
+        f = _load_font(font_name, try_sz)
+        widest = max(td.textlength(" ".join(ln), font=f) for ln in lines)
+        if widest <= max_text_w:
+            font, sz = f, try_sz
+            break
 
-def _draw_3d_stroked_line(draw, x, y, line_words, font, power_idx_offset, power_global_idx, accent_rgb, stroke_w=10):
-    """Draws ultra-crisp MrBeast-style text with 3D offset drop shadow + thick black stroke + power-word highlight."""
-    cur_x = x
-    space_w = int(draw.textlength(" ", font=font))
-    shadow_off = max(6, stroke_w - 2)
+    all_words = [w for ln in lines for w in ln]
+    power_global = _pick_power_word_index(all_words)
+    stroke_w = max(9, sz // 11)
+    line_h = int(sz * 1.12)
+    space_w = int(td.textlength(" ", font=font))
 
-    for j, word in enumerate(line_words):
-        is_power = (power_idx_offset + j == power_global_idx)
-        fill_col = (*accent_rgb, 255) if is_power else (255, 255, 255, 255)
+    layer_h = line_h * len(lines) + 80
+    text_layer = Image.new("RGBA", (width, layer_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(text_layer)
 
-        # Hard 3D drop shadow
-        draw.text(
-            (cur_x + shadow_off, y + shadow_off),
-            word,
-            font=font,
-            fill=(0, 0, 0, 235),
-            stroke_width=stroke_w,
-            stroke_fill=(0, 0, 0, 235),
-        )
-        # Main crisp stroked word
-        draw.text(
-            (cur_x, y),
-            word,
-            font=font,
-            fill=fill_col,
-            stroke_width=stroke_w,
-            stroke_fill=(8, 10, 16, 255),
-        )
-        w_len = int(draw.textlength(word, font=font))
-        cur_x += w_len + space_w
+    offset = 0
+    for idx_l, ln in enumerate(lines):
+        full_w = int(draw.textlength(" ".join(ln), font=font))
+        cur_x = (width - full_w) // 2 if align == "center" else 56
+        cur_y = 24 + idx_l * line_h
 
+        for j, word in enumerate(ln):
+            is_power = (offset + j == power_global)
+            fill_col = (*accent_rgb, 255) if is_power else (255, 255, 255, 255)
 
-def _fit_font_for_lines(draw, lines, font_name, max_width, start_size=132, min_size=62):
-    for sz in range(start_size, min_size - 1, -4):
-        f = _load_font(font_name, sz)
-        widest = max(draw.textlength(" ".join(ln), font=f) for ln in lines)
-        if widest <= max_width:
-            return f, sz
-    return _load_font(font_name, min_size), min_size
+            # Deep multi-step 3D extrusion shadow
+            for depth in (10, 7, 4):
+                draw.text(
+                    (cur_x + depth, cur_y + depth),
+                    word,
+                    font=font,
+                    fill=(0, 0, 0, 210),
+                    stroke_width=stroke_w,
+                    stroke_fill=(0, 0, 0, 210),
+                )
+            draw.text(
+                (cur_x, cur_y),
+                word,
+                font=font,
+                fill=fill_col,
+                stroke_width=stroke_w,
+                stroke_fill=(8, 10, 16, 255),
+            )
+            cur_x += int(draw.textlength(word, font=font)) + space_w
+        offset += len(ln)
 
-
-def _draw_badge_pill(draw, x, y, text, accent_rgb, font_name):
-    lbl = re.sub(r"[^A-Z0-9\s\-&•]", "", str(text or "BREAKING").upper()).strip()[:20] or "BREAKING"
-    f = _load_font("Poppins Black", 28) if font_name != "Poppins Black" else _load_font(font_name, 28)
-    bbox = draw.textbbox((0, 0), lbl, font=f)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    pad_x, pad_y = 22, 12
-
-    # Dark drop shadow behind pill
-    draw.rounded_rectangle(
-        [x + 5, y + 5, x + tw + pad_x * 2 + 5, y + th + pad_y * 2 + 5],
-        radius=12,
-        fill=(0, 0, 0, 190),
-    )
-    draw.rounded_rectangle(
-        [x, y, x + tw + pad_x * 2, y + th + pad_y * 2],
-        radius=12,
-        fill=(*accent_rgb, 255),
-        outline=(255, 255, 255, 220),
-        width=3,
-    )
-    # Dark text on bright accents (gold/green/cyan), white text on red
-    txt_col = (255, 255, 255, 255) if accent_rgb[0] > 200 and accent_rgb[1] < 90 else (10, 12, 16, 255)
-    draw.text((x + pad_x, y + pad_y - 2), lbl, font=f, fill=txt_col)
+    if abs(tilt_deg) > 0.1:
+        text_layer = text_layer.rotate(tilt_deg, resample=BICUBIC, expand=True)
+    return text_layer
 
 
 def create_thumbnail(
@@ -305,134 +336,97 @@ def create_thumbnail(
     headline,
     subtext="",
     output_path="output/thumbnail.jpg",
-    bulletin_badge="TECH BULLETIN",
+    bulletin_badge="DAILY BRIEF",
     font_name="Anton",
-    layout="mrbeast_bottom_slam",
+    layout="mrbeast_top_boom",
     accent="gold",
+    topic_prompt="",
+    gemini_api_key="",
 ):
     """
-    Generates a high-CTR, MrBeast-psychology 1280x720 thumbnail using the real video topic image.
-    Supports 6 auto-downloaded trending fonts and 4 tested CTR layouts.
+    100% Human/MrBeast-Style Thumbnail Engine:
+    - ZERO bottom-bar text clutter (all headlines live cleanly in TOP or UPPER-LEFT).
+    - Tries Gemini native photorealistic studio visual first, then polishes real topic photo.
+    - Uses tilted 3D typography, dramatic lighting, pointing arrows & focal rings.
     """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     width, height = 1280, 720
-    accent_rgb, accent_dark = ACCENT_PALETTES.get(accent, ACCENT_PALETTES["gold"])
+    accent_rgb, _ = ACCENT_PALETTES.get(accent, ACCENT_PALETTES["gold"])
 
-    words = _punchy_words(headline, max_words=4)
-    power_idx = _pick_power_word_index(words)
-    lines = _split_into_lines(words, max_lines=2)
+    # Try custom photorealistic studio scene via Gemini Image API first (no text inside AI image)
+    ai_bg = _try_gemini_studio_bg(topic_prompt, gemini_api_key, width=width, height=height)
+    bg_source = ai_bg if ai_bg is not None else bg_image_path
 
-    focus_right = (layout == "split_left_editorial")
-    rgba = _polish_mrbeast_background(bg_image_path, width=width, height=height, focus_right=focus_right)
+    words = _punchy_words(headline, max_words=3)
+    if layout == "upper_left_hero":
+        lines = [[w] for w in words[:2]] if len(words) >= 2 else [words]
+    else:
+        lines = [words] if len(words) <= 3 else [words[:2], words[2:]]
 
-    if layout == "split_left_editorial":
-        rgba = _add_rim_glow(rgba, accent_rgb, position="center_right")
-        rgba = _add_gradient_scrim(rgba, direction="left", strength=245)
-        draw = ImageDraw.Draw(rgba)
+    if layout == "upper_left_hero":
+        rgba = _polish_photo_background(bg_source, width=width, height=height, focus_right=True)
+        rgba = _add_glow_spot(rgba, accent_rgb, cx=int(width * 0.72), cy=int(height * 0.52), rx=340, ry=280, alpha=68)
+        rgba = _add_scrim(rgba, direction="left", strength=230)
 
-        # Bold vertical left accent bar
-        draw.rectangle([0, 0, 16, height], fill=(*accent_rgb, 255))
-        _draw_badge_pill(draw, 54, 52, bulletin_badge, accent_rgb, font_name)
+        # Massive stacked headline strictly in UPPER-LEFT (never bottom!)
+        txt_img = _render_tilted_3d_headline(
+            700, lines, font_name, accent_rgb, max_text_w=600, tilt_deg=-2.0, start_sz=146, align="left"
+        )
+        rgba.alpha_composite(txt_img, (18, 28))
 
-        font, sz = _fit_font_for_lines(draw, lines, font_name, max_width=700, start_size=122, min_size=64)
-        line_h = int(sz * 1.16)
-        start_y = 175 if len(lines) == 2 else 245
+        # Bold creator arrow pointing from upper-left text straight to the hero subject on the right
+        arrow_col = (255, 42, 60) if accent != "red" else (255, 230, 0)
+        rgba = _draw_mrbeast_arrow(rgba, (470, 315), (720, 415), color_rgb=arrow_col)
 
-        offset = 0
-        for idx_l, ln in enumerate(lines):
-            _draw_3d_stroked_line(
-                draw, 54, start_y + idx_l * line_h, ln, font, offset, power_idx, accent_rgb, stroke_w=10
-            )
-            offset += len(ln)
+    elif layout == "split_vs_drama":
+        rgba = _polish_photo_background(bg_source, width=width, height=height, focus_right=False)
+        # Dramatic warm-vs-cool MrBeast split color tint on left vs right halves
+        tint = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tint)
+        td.rectangle([0, 0, width // 2, height], fill=(0, 140, 255, 44))
+        td.rectangle([width // 2, 0, width, height], fill=(255, 45, 65, 48))
+        td.line([(width // 2, 0), (width // 2, height)], fill=(255, 230, 0, 220), width=8)
+        rgba = Image.alpha_composite(rgba, tint)
+        rgba = _add_scrim(rgba, direction="top", strength=225)
 
-        if subtext:
-            sub_clean = str(subtext).strip().upper()[:30]
-            f_sub = _load_font("Poppins Black", 34)
-            draw.text(
-                (56, height - 108),
-                sub_clean,
-                font=f_sub,
-                fill=(235, 240, 248, 255),
-                stroke_width=5,
-                stroke_fill=(0, 0, 0, 230),
-            )
+        txt_img = _render_tilted_3d_headline(
+            width, lines, font_name, accent_rgb, max_text_w=1140, tilt_deg=-1.8, start_sz=152, align="center"
+        )
+        tx = (width - txt_img.width) // 2
+        rgba.alpha_composite(txt_img, (tx, 16))
 
-    elif layout == "top_focus_frame":
-        rgba = _add_rim_glow(rgba, accent_rgb, position="center")
-        rgba = _add_gradient_scrim(rgba, direction="top", strength=230)
-        draw = ImageDraw.Draw(rgba)
+    elif layout == "minimal_big_stat":
+        rgba = _polish_photo_background(bg_source, width=width, height=height, focus_right=False)
+        rgba = _add_glow_spot(rgba, accent_rgb, cx=width // 2, cy=int(height * 0.58), rx=380, ry=260, alpha=72)
+        rgba = _add_scrim(rgba, direction="top", strength=210)
 
-        # Crisp glowing focal corner brackets around lower subject area (draws eye to real visual)
-        bx0, by0, bx1, by1 = 220, 320, 1060, 670
-        blen = 52
-        for (px, py, dx, dy) in [
-            (bx0, by0, 1, 1), (bx1, by0, -1, 1), (bx0, by1, 1, -1), (bx1, by1, -1, -1)
-        ]:
-            draw.line([(px, py), (px + dx * blen, py)], fill=(*accent_rgb, 235), width=7)
-            draw.line([(px, py), (px, py + dy * blen)], fill=(*accent_rgb, 235), width=7)
-
-        font, sz = _fit_font_for_lines(draw, lines, font_name, max_width=1140, start_size=128, min_size=68)
-        line_h = int(sz * 1.12)
-        start_y = 36 if len(lines) == 2 else 74
-
-        offset = 0
-        for idx_l, ln in enumerate(lines):
-            lw = int(draw.textlength(" ".join(ln), font=font))
-            lx = (width - lw) // 2
-            _draw_3d_stroked_line(
-                draw, lx, start_y + idx_l * line_h, ln, font, offset, power_idx, accent_rgb, stroke_w=11
-            )
-            offset += len(ln)
-
-        _draw_badge_pill(draw, 44, height - 92, bulletin_badge, accent_rgb, font_name)
-
-    elif layout == "youtube_clean_pro":
-        rgba = _add_rim_glow(rgba, accent_rgb, position="bottom")
-        rgba = _add_gradient_scrim(rgba, direction="bottom", strength=235)
-        draw = ImageDraw.Draw(rgba)
-
-        # Subtle studio outer frame
-        draw.rectangle([10, 10, width - 10, height - 10], outline=(*accent_rgb, 180), width=5)
-        _draw_badge_pill(draw, 48, 44, bulletin_badge, accent_rgb, font_name)
-
-        font, sz = _fit_font_for_lines(draw, lines, font_name, max_width=1140, start_size=126, min_size=66)
-        line_h = int(sz * 1.14)
-        total_h = line_h * len(lines)
-        start_y = height - total_h - 68
-
-        offset = 0
-        for idx_l, ln in enumerate(lines):
-            _draw_3d_stroked_line(
-                draw, 54, start_y + idx_l * line_h, ln, font, offset, power_idx, accent_rgb, stroke_w=10
-            )
-            offset += len(ln)
+        txt_img = _render_tilted_3d_headline(
+            width, lines, font_name, accent_rgb, max_text_w=1160, tilt_deg=0.0, start_sz=160, align="center"
+        )
+        tx = (width - txt_img.width) // 2
+        rgba.alpha_composite(txt_img, (tx, 22))
+        rgba = _draw_focus_ring(rgba, cx=width // 2, cy=int(height * 0.62), radius=128, color_rgb=accent_rgb)
 
     else:
-        # Default: "mrbeast_bottom_slam" — Full-bleed high-contrast real visual + massive 3D centered text
-        rgba = _add_rim_glow(rgba, accent_rgb, position="bottom")
-        rgba = _add_gradient_scrim(rgba, direction="bottom", strength=240)
-        draw = ImageDraw.Draw(rgba)
+        # Default: "mrbeast_top_boom" — Massive slightly-tilted TOP headline + glowing arrow + focus ring on subject
+        rgba = _polish_photo_background(bg_source, width=width, height=height, focus_right=False)
+        rgba = _add_glow_spot(rgba, accent_rgb, cx=width // 2, cy=int(height * 0.62), rx=360, ry=250, alpha=62)
+        rgba = _add_scrim(rgba, direction="top", strength=225)
 
-        _draw_badge_pill(draw, 44, 40, bulletin_badge, accent_rgb, font_name)
+        txt_img = _render_tilted_3d_headline(
+            width, lines, font_name, accent_rgb, max_text_w=1140, tilt_deg=-2.8, start_sz=154, align="center"
+        )
+        tx = (width - txt_img.width) // 2
+        rgba.alpha_composite(txt_img, (tx, 14))
 
-        font, sz = _fit_font_for_lines(draw, lines, font_name, max_width=1160, start_size=136, min_size=68)
-        line_h = int(sz * 1.12)
-        total_h = line_h * len(lines)
-        start_y = height - total_h - 54
-
-        offset = 0
-        for idx_l, ln in enumerate(lines):
-            lw = int(draw.textlength(" ".join(ln), font=font))
-            lx = (width - lw) // 2
-            _draw_3d_stroked_line(
-                draw, lx, start_y + idx_l * line_h, ln, font, offset, power_idx, accent_rgb, stroke_w=12
-            )
-            offset += len(ln)
+        arrow_col = (255, 42, 60) if accent != "red" else (255, 230, 0)
+        rgba = _draw_mrbeast_arrow(rgba, (290, 290), (500, 445), color_rgb=arrow_col)
+        rgba = _draw_focus_ring(rgba, cx=640, cy=485, radius=118, color_rgb=arrow_col)
 
     final_rgb = rgba.convert("RGB")
-    final_rgb.save(output_path, "JPEG", quality=93, optimize=True)
+    final_rgb.save(output_path, "JPEG", quality=94, optimize=True)
     print(
-        f"[Thumbnail] Saved 1280x720 High-CTR Thumbnail -> {output_path} | "
+        f"[Thumbnail] Saved 1280x720 MrBeast-Style Thumbnail -> {output_path} | "
         f"Font: {font_name} | Layout: {layout} | Accent: {accent}"
     )
     return output_path
