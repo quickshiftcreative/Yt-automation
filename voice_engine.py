@@ -18,12 +18,12 @@ TONE_PROSODY = {
 MALE_VOICES = ["en-US-AndrewNeural", "en-US-BrianNeural"]
 FEMALE_VOICES = ["en-US-AvaNeural", "en-US-EmmaNeural"]
 
-# Natural US spoken normalization so Edge-TTS never stumbles on stock tickers or finance shorthand
 SPOKEN_REPLACEMENTS = [
     (r"\$(\d+(?:\.\d+)?)\s*[Tt]\b", r"$\1 trillion"),
     (r"\$(\d+(?:\.\d+)?)\s*[Bb]\b", r"$\1 billion"),
     (r"\$(\d+(?:\.\d+)?)\s*[Mm]\b", r"$\1 million"),
     (r"\b(\d+(?:\.\d+)?)\s*[xX]\b", r"\1 times"),
+    (r"\b(\d+(?:,\d+)*(?:\.\d+)?)\s*pts?\b", r"\1 points"),
     (r"\bNVDA\b", "Nvidia"),
     (r"\bAAPL\b", "Apple"),
     (r"\bMSFT\b", "Microsoft"),
@@ -43,24 +43,19 @@ SPOKEN_REPLACEMENTS = [
 def _normalize_for_natural_speech(text):
     out = str(text or "")
     for pat, repl in SPOKEN_REPLACEMENTS:
-        out = re.sub(pat, repl, out)
+        out = re.sub(pat, repl, out, flags=re.IGNORECASE if "pts" in pat else 0)
     return re.sub(r"\s+", " ", out).strip()
 
 
 def _pick_host_pair():
     style = os.getenv("VOICE_STYLE", "auto").strip().lower()
     if style == "male_us":
-        main_v = random.choice(MALE_VOICES)
-        co_v = random.choice(FEMALE_VOICES)
-    elif style == "female_us":
-        main_v = random.choice(FEMALE_VOICES)
-        co_v = random.choice(MALE_VOICES)
-    else:
-        if random.random() < 0.55:
-            main_v, co_v = random.choice(MALE_VOICES), random.choice(FEMALE_VOICES)
-        else:
-            main_v, co_v = random.choice(FEMALE_VOICES), random.choice(MALE_VOICES)
-    return main_v, co_v
+        return random.choice(MALE_VOICES), random.choice(FEMALE_VOICES)
+    if style == "female_us":
+        return random.choice(FEMALE_VOICES), random.choice(MALE_VOICES)
+    if random.random() < 0.55:
+        return random.choice(MALE_VOICES), random.choice(FEMALE_VOICES)
+    return random.choice(FEMALE_VOICES), random.choice(MALE_VOICES)
 
 
 def _probe_duration(media_path):
@@ -71,7 +66,7 @@ def _probe_duration(media_path):
         media_path,
     ]
     out = subprocess.check_output(cmd, text=True).strip()
-    return max(0.5, float(out))
+    return max(0.4, float(out))
 
 
 def _format_ass_time(seconds):
@@ -96,7 +91,7 @@ def _supports_boundary_param():
         return False
 
 
-async def _synthesize_scene(text, voice, rate, pitch, out_raw_mp3):
+async def _synthesize_single_beat(text, voice, rate, pitch, out_raw_mp3):
     kwargs = {"voice": voice, "rate": rate, "pitch": pitch}
     if _supports_boundary_param():
         kwargs["boundary"] = "WordBoundary"
@@ -119,6 +114,26 @@ async def _synthesize_scene(text, voice, rate, pitch, out_raw_mp3):
     with open(out_raw_mp3, "wb") as f:
         f.write(audio_bytes)
     return words
+
+
+async def _synthesize_all_beats_concurrent(beat_jobs):
+    """Synthesizes up to 4 beats concurrently for 4x faster pipeline speed while preserving exact order."""
+    sem = asyncio.Semaphore(4)
+
+    async def _worker(job):
+        async with sem:
+            try:
+                words = await _synthesize_single_beat(
+                    job["spoken_text"], job["voice"], job["rate"], job["pitch"], job["raw_mp3"]
+                )
+                return words
+            except Exception as e:
+                print(f"[Voice] Retry fallback on beat {job['beat_idx'] + 1}: {e}")
+                return await _synthesize_single_beat(
+                    job["spoken_text"], "en-US-AndrewNeural", "+1%", "+0Hz", job["raw_mp3"]
+                )
+
+    return await asyncio.gather(*[_worker(j) for j in beat_jobs])
 
 
 def _build_word_chunks(words, max_words=3, max_chars=22):
@@ -161,8 +176,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     max_w = 3 if is_shorts else 4
     max_c = 18 if is_shorts else 28
 
-    for scene_words in all_word_events:
-        chunks = _build_word_chunks(scene_words, max_words=max_w, max_chars=max_c)
+    for beat_words in all_word_events:
+        chunks = _build_word_chunks(beat_words, max_words=max_w, max_chars=max_c)
         for ch in chunks:
             for active_i, w_act in enumerate(ch):
                 t0 = w_act["start"]
@@ -191,75 +206,126 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
+    """
+    Flattens scenes into exact micro-beats, synthesizes each beat with dynamic prosody,
+    and returns exact millisecond-locked beat timelines for beat-by-beat visual sync.
+    """
     os.makedirs(work_dir, exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
     main_voice, cohost_voice = _pick_host_pair()
-    breath_pad = 0.22 if is_shorts else 0.28
+
+    beat_pad_in_scene = 0.12 if is_shorts else 0.15
+    scene_breath_pad = 0.22 if is_shorts else 0.28
     outro_tail_pad = 1.80 if is_shorts else 2.50
 
+    # Flatten scenes into ordered beat jobs
+    beat_jobs = []
+    beat_idx = 0
+    for s_idx, sc in enumerate(scenes):
+        is_last_scene = (s_idx == len(scenes) - 1)
+        tone = "calm" if is_last_scene else sc.get("tone", "hook" if s_idx == 0 else "analytical").strip().lower()
+        speaker = str(sc.get("speaker", "main")).strip().lower()
+        itype = str(sc.get("interactive_type", "none")).strip().lower()
+        highlight_text = sc.get("highlight_text", "")
+
+        raw_beats = sc.get("beats") or []
+        if not raw_beats:
+            nar = sc.get("narration", "").strip()
+            if not nar:
+                continue
+            raw_beats = [{
+                "text": nar,
+                "visual_type": "stock_video",
+                "query": sc.get("visual_query", "technology"),
+                "metric_value": "",
+                "metric_label": "",
+            }]
+
+        for b_pos, b in enumerate(raw_beats):
+            raw_txt = str(b.get("text", "")).strip()
+            if not raw_txt:
+                continue
+            is_last_in_scene = (b_pos == len(raw_beats) - 1)
+            active_voice = cohost_voice if (not is_shorts and speaker == "cohost" and not is_last_scene) else main_voice
+
+            base_rate, base_pitch = TONE_PROSODY.get(tone, ("+1%", "+0Hz"))
+            if is_shorts and not is_last_scene and tone not in ("hook", "urgent", "excited"):
+                base_rate = "+4%"
+
+            beat_jobs.append({
+                "beat_idx": beat_idx,
+                "scene_index": s_idx,
+                "is_scene_start": (b_pos == 0),
+                "is_last_in_scene": is_last_in_scene,
+                "is_last_scene": is_last_scene,
+                "raw_text": raw_txt,
+                "spoken_text": _normalize_for_natural_speech(raw_txt),
+                "voice": active_voice,
+                "rate": base_rate,
+                "pitch": base_pitch,
+                "tone": tone,
+                "speaker": speaker,
+                "interactive_type": itype if (is_last_in_scene or b_pos == 0) else "none",
+                "scene_interactive": itype,
+                "highlight_text": highlight_text,
+                "visual_type": b.get("visual_type", "stock_video"),
+                "visual_query": b.get("query", sc.get("visual_query", "technology")),
+                "metric_value": b.get("metric_value", ""),
+                "metric_label": b.get("metric_label", ""),
+                "raw_mp3": os.path.join(work_dir, f"raw_beat_{beat_idx:03d}.mp3"),
+                "clean_mp3": os.path.join(work_dir, f"beat_{beat_idx:03d}.mp3"),
+            })
+            beat_idx += 1
+
+    if not beat_jobs:
+        raise RuntimeError("No valid spoken beats found in script blueprint.")
+
     print(
-        f"[Voice] Main Host: {main_voice} | Co-Host Analyst: {cohost_voice} | "
-        f"Natural Speech Normalization + Outro Tail ({outro_tail_pad:.1f}s) ON"
+        f"[Voice] Main: {main_voice} | Co-Host: {cohost_voice} | "
+        f"Synthesizing {len(beat_jobs)} exact-synced beats concurrently..."
     )
 
-    scene_audio_info = []
+    all_raw_words = asyncio.run(_synthesize_all_beats_concurrent(beat_jobs))
+
+    beat_audio_info = []
     all_word_events = []
     timeline_cursor = 0.0
+    total_beats = len(beat_jobs)
 
-    for i, sc in enumerate(scenes):
-        raw_narration = sc.get("narration", "").strip()
-        if not raw_narration:
-            continue
+    for k, (job, words) in enumerate(zip(beat_jobs, all_raw_words)):
+        is_final_beat = (k == total_beats - 1)
+        is_countdown_pause = (job["scene_interactive"] == "countdown" and job["is_last_in_scene"])
 
-        spoken_text = _normalize_for_natural_speech(raw_narration)
-        is_last = (i == len(scenes) - 1)
-        itype = str(sc.get("interactive_type", "none")).strip().lower()
-        speaker = str(sc.get("speaker", "main")).strip().lower()
-        active_voice = cohost_voice if (not is_shorts and speaker == "cohost" and not is_last) else main_voice
-
-        tone = "calm" if is_last else sc.get("tone", "hook" if i == 0 else "analytical").strip().lower()
-        base_rate, base_pitch = TONE_PROSODY.get(tone, ("+1%", "+0Hz"))
-        if is_shorts and not is_last and tone not in ("hook", "urgent", "excited"):
-            base_rate = "+4%"
-
-        raw_mp3 = os.path.join(work_dir, f"raw_voice_{i:03d}.mp3")
-        clean_mp3 = os.path.join(work_dir, f"voice_{i:03d}.mp3")
-
-        try:
-            words = asyncio.run(_synthesize_scene(spoken_text, active_voice, base_rate, base_pitch, raw_mp3))
-        except Exception as e:
-            print(f"[Voice] Retry fallback voice on scene {i + 1}: {e}")
-            words = asyncio.run(_synthesize_scene(spoken_text, "en-US-AndrewNeural", "+1%", "+0Hz", raw_mp3))
-
-        # Add natural breath pause, 1.8s interactive countdown suspense pause, or smooth outro tail
-        if is_last:
+        if is_final_beat:
             pad_sec = outro_tail_pad
-        elif itype == "countdown":
+        elif is_countdown_pause:
             pad_sec = 1.80
+        elif job["is_last_in_scene"]:
+            pad_sec = scene_breath_pad
         else:
-            pad_sec = breath_pad
+            pad_sec = beat_pad_in_scene
 
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", raw_mp3,
+                "ffmpeg", "-y", "-i", job["raw_mp3"],
                 "-af", f"apad=pad_dur={pad_sec:.2f}",
                 "-ar", "44100", "-ac", "2",
                 "-c:a", "libmp3lame", "-q:a", "3",
-                clean_mp3,
+                job["clean_mp3"],
             ],
             capture_output=True,
             check=True,
         )
 
-        dur = _probe_duration(clean_mp3)
+        dur = _probe_duration(job["clean_mp3"])
 
         if not words:
-            raw_tokens = spoken_text.split()
-            speak_dur = max(0.5, dur - pad_sec)
+            raw_tokens = job["spoken_text"].split()
+            speak_dur = max(0.4, dur - pad_sec)
             step = speak_dur / max(1, len(raw_tokens))
             words = [
-                {"text": _escape_ass(tok), "start": k * step, "end": (k + 1) * step}
-                for k, tok in enumerate(raw_tokens)
+                {"text": _escape_ass(tok), "start": m * step, "end": (m + 1) * step}
+                for m, tok in enumerate(raw_tokens)
                 if _escape_ass(tok)
             ]
 
@@ -273,25 +339,30 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
         ]
         all_word_events.append(shifted_words)
 
-        spk_lbl = "COHOST" if active_voice == cohost_voice else "HOST"
-        print(f"[Voice] Scene {i + 1}/{len(scenes)} [{spk_lbl} | {tone} | {itype}] -> {dur:.2f}s")
-
-        scene_audio_info.append({
-            "index": i,
-            "audio_path": clean_mp3,
+        beat_audio_info.append({
+            "index": k,
+            "scene_index": job["scene_index"],
+            "is_scene_start": job["is_scene_start"],
+            "is_last_in_scene": job["is_last_in_scene"],
+            "is_final_beat": is_final_beat,
+            "audio_path": job["clean_mp3"],
             "duration": dur,
             "start_time": timeline_cursor,
             "end_time": timeline_cursor + dur,
-            "countdown_start": (timeline_cursor + max(0.3, dur - pad_sec)) if itype == "countdown" else None,
-            "narration": raw_narration,
-            "visual_query": sc.get("visual_query", "technology"),
-            "tone": tone,
-            "speaker": speaker,
-            "interactive_type": itype,
-            "highlight_text": sc.get("highlight_text", ""),
+            "countdown_start": (timeline_cursor + max(0.3, dur - pad_sec)) if is_countdown_pause else None,
+            "narration": job["raw_text"],
+            "visual_type": job["visual_type"],
+            "visual_query": job["visual_query"],
+            "metric_value": job["metric_value"],
+            "metric_label": job["metric_label"],
+            "tone": job["tone"],
+            "speaker": job["speaker"],
+            "interactive_type": job["scene_interactive"] if job["is_last_in_scene"] else ("music_drop" if job["scene_interactive"] == "music_drop" and job["is_scene_start"] else "none"),
+            "highlight_text": job["highlight_text"],
         })
         timeline_cursor += dur
 
+    print(f"[Voice] Synthesized {total_beats} exact-synced beats | Total duration: {timeline_cursor:.2f}s")
     ass_out = subtitle_path if subtitle_path.lower().endswith(".ass") else subtitle_path.rsplit(".", 1)[0] + ".ass"
     _write_pop_captions_ass(all_word_events, ass_out, is_shorts)
-    return scene_audio_info, timeline_cursor
+    return beat_audio_info, timeline_cursor
