@@ -24,7 +24,6 @@ THUMBNAIL_FONTS = [
     "Bangers",
 ]
 
-# 4 Zero-Bottom-Text MrBeast / Human Creator Layouts
 THUMBNAIL_LAYOUTS = [
     "mrbeast_top_boom",
     "split_vs_drama",
@@ -61,6 +60,7 @@ DEFAULT_MEMORY = {
     "recent_viewer_comments": [],
     "healed_video_ids": [],
     "best_long_video_id": "",
+    "endscreen_picks": {"top": None, "boost": None},
     "last_branding_sync_utc": "",
     "golden_hour_shorts_et": 20,
     "golden_hour_long_et": 20,
@@ -96,6 +96,8 @@ def load_strategy_memory():
                 if te.get("winning_layout") not in THUMBNAIL_LAYOUTS:
                     te["winning_layout"] = "mrbeast_top_boom"
                 merged["thumbnail_experiments"] = te
+            if "endscreen_picks" not in merged or not isinstance(merged["endscreen_picks"], dict):
+                merged["endscreen_picks"] = {"top": None, "boost": None}
             return merged
         except Exception:
             pass
@@ -108,6 +110,16 @@ def save_strategy_memory(mem):
             json.dump(mem, f, indent=2)
     except Exception as e:
         print(f"[LearningEngine] Warning saving memory: {e}")
+
+
+def get_endscreen_pair():
+    """Returns 1 top-performing Long video and 1 low-performing Long video to promote on End Screen."""
+    mem = load_strategy_memory()
+    picks = mem.get("endscreen_picks") or {}
+    return {
+        "top": picks.get("top"),
+        "boost": picks.get("boost"),
+    }
 
 
 def fetch_youtube_autocomplete_keywords(seed_topic, max_results=14):
@@ -370,7 +382,6 @@ def record_thumbnail_experiment(video_id, thumb_cfg, topic="", is_shorts=False):
 
 
 def should_sync_channel_branding():
-    """Returns True if channel SEO description/keywords haven't been synced in the past 7 days."""
     mem = load_strategy_memory()
     last_s = mem.get("last_branding_sync_utc", "")
     if not last_s:
@@ -415,7 +426,7 @@ def update_strategy_from_youtube(youtube_service=None):
         hourly_raw = {"shorts": {}, "long": {}}
         pattern_scores, keyword_scores = {}, {}
         top_performing, live_scheduled_slots, public_vid_ids, live_video_metrics = [], {}, [], {}
-        best_long = (0, "")
+        long_catalog = []
 
         for v in v_resp.get("items", []):
             vid_id = v.get("id", "")
@@ -453,13 +464,18 @@ def update_strategy_from_youtube(youtube_service=None):
             reach_score = (views * 0.55 + velocity * 12.0) * eng_boost
 
             live_video_metrics[vid_id] = {"views": views, "velocity": velocity, "reach_score": reach_score}
+            raw_title = str(snip.get("title", "")).strip()
 
             if v_fmt == "shorts":
                 shorts_views.append(views)
             else:
                 long_views.append(views)
-                if views >= best_long[0]:
-                    best_long = (views, vid_id)
+                long_catalog.append({
+                    "id": vid_id,
+                    "title": raw_title[:85],
+                    "views": views,
+                    "reach": reach_score,
+                })
 
             pub_et = pub_dt.astimezone(US_EASTERN)
             hr_key = str(pub_et.hour)
@@ -468,7 +484,7 @@ def update_strategy_from_youtube(youtube_service=None):
             bucket["reach_sum"] += reach_score
             bucket["count"] += 1
 
-            title_clean = re.sub(r"#\w+", "", snip.get("title", "")).strip()
+            title_clean = re.sub(r"#\w+", "", raw_title).strip()
             if title_clean:
                 top_performing.append((reach_score, title_clean))
                 pat = _classify_title_pattern(title_clean)
@@ -487,8 +503,20 @@ def update_strategy_from_youtube(youtube_service=None):
             mem["shorts_score"] = round(sum(shorts_views) / len(shorts_views), 2)
         if long_views:
             mem["long_score"] = round(sum(long_views) / len(long_views), 2)
-        if best_long[1]:
-            mem["best_long_video_id"] = best_long[1]
+
+        # Pick 1 Top-Performing Long Video + 1 Low-Performing Long Video for End Screen Promotion
+        if long_catalog:
+            sorted_long = sorted(long_catalog, key=lambda x: (x["views"], x["reach"]), reverse=True)
+            top_vid = sorted_long[0]
+            boost_vid = sorted_long[-1] if len(sorted_long) >= 2 else None
+            mem["best_long_video_id"] = top_vid["id"]
+            mem["endscreen_picks"] = {
+                "top": {"id": top_vid["id"], "title": top_vid["title"], "views": top_vid["views"]},
+                "boost": (
+                    {"id": boost_vid["id"], "title": boost_vid["title"], "views": boost_vid["views"]}
+                    if boost_vid else None
+                ),
+            }
 
         _update_thumbnail_experiment_scores(mem, live_video_metrics)
 
@@ -540,10 +568,12 @@ def update_strategy_from_youtube(youtube_service=None):
 
         save_strategy_memory(mem)
         te = mem.get("thumbnail_experiments") or {}
+        es = mem.get("endscreen_picks") or {}
         print(
             f"[LearningEngine] 100x Sync -> Shorts avg: {mem['shorts_score']} | Long avg: {mem['long_score']} | "
             f"Golden ET: S={mem['golden_hour_shorts_et']:02d}:00, L={mem['golden_hour_long_et']:02d}:00 | "
-            f"ThumbAI Leader ({te.get('total_recorded', 0)}/50): {te.get('winning_font')} + {te.get('winning_layout')}"
+            f"ThumbAI ({te.get('total_recorded', 0)}/50): {te.get('winning_font')} + {te.get('winning_layout')} | "
+            f"EndScreen Pair: Top={bool(es.get('top'))}, Boost={bool(es.get('boost'))}"
         )
     except Exception as e:
         print(f"[LearningEngine] Stats sync skipped: {e}")
@@ -557,7 +587,7 @@ def _gemini_seo_rewrite(gemini_api_key, old_title, old_desc, seo_keywords, is_sh
     kw_str = ", ".join(seo_keywords[:12]) if seo_keywords else "tech news, ai news, gaming, stock market"
     prompt = f"""You are a YouTube US SEO & CTR Optimization Specialist.
 An uploaded {'YouTube Short' if is_shorts else 'Long-Form YouTube Video'} is underperforming in its first 48 hours.
-Rewrite its Title, SEO Description (keep any existing timestamps intact), and Tags to maximize US Search ranking and Browse/Shorts Feed CTR.
+Rewrite its Title, SEO Description (keep any existing timestamps and Watch Next links intact), and Tags to maximize US Search ranking and Browse/Shorts Feed CTR.
 
 Current Title: {old_title}
 Current Description: {old_desc[:1200]}
@@ -656,7 +686,8 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
                             "description": new_desc,
                             "tags": new_tags,
                             "categoryId": snip.get("categoryId", "28"),
-                            "defaultLanguage": "en",
+                            "defaultLanguage": "en-US",
+                            "defaultAudioLanguage": "en-US",
                         },
                     },
                 ).execute()
