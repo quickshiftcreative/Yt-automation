@@ -12,7 +12,7 @@ TONE_PROSODY = {
     "excited":    ("+6%", "+3Hz"),
     "serious":    ("-3%", "-2Hz"),
     "analytical": ("+1%", "+0Hz"),
-    "calm":       ("-3%", "-1Hz"),
+    "calm":       ("-4%", "-1Hz"),
 }
 
 MALE_VOICES = ["en-US-AndrewNeural", "en-US-BrianNeural"]
@@ -31,6 +31,7 @@ SPOKEN_REPLACEMENTS = [
     (r"\bGOOGL\b", "Google"),
     (r"\bAMZN\b", "Amazon"),
     (r"\bINTC\b", "Intel"),
+    (r"\bTSMC\b", "T S M C"),
     (r"\bYoY\b", "year-over-year"),
     (r"\bQoQ\b", "quarter-over-quarter"),
     (r"\bQ1\b", "first quarter"),
@@ -117,16 +118,14 @@ async def _synthesize_single_beat(text, voice, rate, pitch, out_raw_mp3):
 
 
 async def _synthesize_all_beats_concurrent(beat_jobs):
-    """Synthesizes up to 4 beats concurrently for 4x faster pipeline speed while preserving exact order."""
     sem = asyncio.Semaphore(4)
 
     async def _worker(job):
         async with sem:
             try:
-                words = await _synthesize_single_beat(
+                return await _synthesize_single_beat(
                     job["spoken_text"], job["voice"], job["rate"], job["pitch"], job["raw_mp3"]
                 )
-                return words
             except Exception as e:
                 print(f"[Voice] Retry fallback on beat {job['beat_idx'] + 1}: {e}")
                 return await _synthesize_single_beat(
@@ -154,8 +153,8 @@ def _build_word_chunks(words, max_words=3, max_chars=22):
 
 def _write_pop_captions_ass(all_word_events, ass_path, is_shorts):
     play_x, play_y = (1080, 1920) if is_shorts else (1920, 1080)
-    font_size = 74 if is_shorts else 60
-    margin_v = 360 if is_shorts else 88
+    font_size = 74 if is_shorts else 58
+    margin_v = 340 if is_shorts else 76
     outline_w = 6 if is_shorts else 5
 
     header = f"""[Script Info]
@@ -206,19 +205,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
-    """
-    Flattens scenes into exact micro-beats, synthesizes each beat with dynamic prosody,
-    and returns exact millisecond-locked beat timelines for beat-by-beat visual sync.
-    """
     os.makedirs(work_dir, exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
     main_voice, cohost_voice = _pick_host_pair()
 
-    beat_pad_in_scene = 0.12 if is_shorts else 0.15
-    scene_breath_pad = 0.22 if is_shorts else 0.28
-    outro_tail_pad = 1.80 if is_shorts else 2.50
+    beat_pad_in_scene = 0.10 if is_shorts else 0.14
+    scene_breath_pad = 0.20 if is_shorts else 0.26
+    outro_tail_pad = 2.00 if is_shorts else 2.60
 
-    # Flatten scenes into ordered beat jobs
     beat_jobs = []
     beat_idx = 0
     for s_idx, sc in enumerate(scenes):
@@ -237,6 +231,8 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
                 "text": nar,
                 "visual_type": "stock_video",
                 "query": sc.get("visual_query", "technology"),
+                "alt_query": "",
+                "screen_tag": "",
                 "metric_value": "",
                 "metric_label": "",
             }]
@@ -265,11 +261,12 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
                 "pitch": base_pitch,
                 "tone": tone,
                 "speaker": speaker,
-                "interactive_type": itype if (is_last_in_scene or b_pos == 0) else "none",
                 "scene_interactive": itype,
                 "highlight_text": highlight_text,
                 "visual_type": b.get("visual_type", "stock_video"),
                 "visual_query": b.get("query", sc.get("visual_query", "technology")),
+                "alt_query": b.get("alt_query", ""),
+                "screen_tag": b.get("screen_tag", ""),
                 "metric_value": b.get("metric_value", ""),
                 "metric_label": b.get("metric_label", ""),
                 "raw_mp3": os.path.join(work_dir, f"raw_beat_{beat_idx:03d}.mp3"),
@@ -280,11 +277,7 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
     if not beat_jobs:
         raise RuntimeError("No valid spoken beats found in script blueprint.")
 
-    print(
-        f"[Voice] Main: {main_voice} | Co-Host: {cohost_voice} | "
-        f"Synthesizing {len(beat_jobs)} exact-synced beats concurrently..."
-    )
-
+    print(f"[Voice] Main: {main_voice} | Co-Host: {cohost_voice} | Synthesizing {len(beat_jobs)} synced beats...")
     all_raw_words = asyncio.run(_synthesize_all_beats_concurrent(beat_jobs))
 
     beat_audio_info = []
@@ -330,11 +323,7 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
             ]
 
         shifted_words = [
-            {
-                "text": w["text"],
-                "start": timeline_cursor + w["start"],
-                "end": timeline_cursor + w["end"],
-            }
+            {"text": w["text"], "start": timeline_cursor + w["start"], "end": timeline_cursor + w["end"]}
             for w in words
         ]
         all_word_events.append(shifted_words)
@@ -353,6 +342,8 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
             "narration": job["raw_text"],
             "visual_type": job["visual_type"],
             "visual_query": job["visual_query"],
+            "alt_query": job["alt_query"],
+            "screen_tag": job["screen_tag"],
             "metric_value": job["metric_value"],
             "metric_label": job["metric_label"],
             "tone": job["tone"],
@@ -362,7 +353,7 @@ def generate_scene_voices_and_srt(scenes, work_dir, subtitle_path):
         })
         timeline_cursor += dur
 
-    print(f"[Voice] Synthesized {total_beats} exact-synced beats | Total duration: {timeline_cursor:.2f}s")
+    print(f"[Voice] Synthesized {total_beats} synced beats | Total duration: {timeline_cursor:.2f}s")
     ass_out = subtitle_path if subtitle_path.lower().endswith(".ass") else subtitle_path.rsplit(".", 1)[0] + ".ass"
     _write_pop_captions_ass(all_word_events, ass_out, is_shorts)
     return beat_audio_info, timeline_cursor
