@@ -1,6 +1,6 @@
 {
-  "shorts_score": 180.87,
-  "long_score": 5.56,
+  "shorts_score": 165.18,
+  "long_score": 5.67,
   "winning_topics": [
     "California Sues OpenAI Over Safety",
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
@@ -35,11 +35,11 @@
   "golden_hour_long_et": 4,
   "top_hours_shorts_et": [
     19,
-    20,
     21,
     18,
     16,
-    22
+    22,
+    13
   ],
   "top_hours_long_et": [
     4,
@@ -49,82 +49,87 @@
   ],
   "hourly_stats": {
     "shorts": {
+      "20": {
+        "count": 1,
+        "avg_views": 0.0,
+        "avg_reach": 0.0
+      },
+      "19": {
+        "count": 4,
+        "avg_views": 516.8,
+        "avg_reach": 979.94
+      },
       "12": {
         "count": 2,
         "avg_views": 8.0,
-        "avg_reach": 34.11
+        "avg_reach": 30.61
       },
       "8": {
         "count": 2,
-        "avg_views": 53.5,
-        "avg_reach": 110.89
+        "avg_views": 54.0,
+        "avg_reach": 107.51
       },
       "23": {
         "count": 1,
         "avg_views": 116.0,
-        "avg_reach": 548.59
-      },
-      "19": {
-        "count": 3,
-        "avg_views": 658.0,
-        "avg_reach": 1260.0
+        "avg_reach": 521.48
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 8.25
+        "avg_reach": 7.94
       },
       "9": {
         "count": 2,
         "avg_views": 56.5,
-        "avg_reach": 104.84
+        "avg_reach": 102.58
       },
       "0": {
         "count": 1,
-        "avg_views": 335.0,
-        "avg_reach": 588.32
+        "avg_views": 336.0,
+        "avg_reach": 578.64
       },
       "10": {
         "count": 1,
         "avg_views": 41.0,
-        "avg_reach": 70.29
+        "avg_reach": 69.31
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 13.09
+        "avg_reach": 12.99
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 6.52
+        "avg_reach": 6.47
       }
     },
     "long": {
       "4": {
         "count": 3,
-        "avg_views": 13.0,
-        "avg_reach": 53.38
+        "avg_views": 13.3,
+        "avg_reach": 50.87
       },
       "21": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 7.93
+        "avg_reach": 7.61
       },
       "22": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 6.24
+        "avg_reach": 6.11
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.38
+        "avg_reach": 1.36
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.39
+        "avg_reach": 4.36
       }
     }
   },
@@ -139,16 +144,43 @@
         "hour_et": 20,
         "format": "shorts",
         "publish_at_utc": "2026-11-27T01:15:00Z"
+      },
+      {
+        "hour_et": 21,
+        "format": "long",
+        "publish_at_utc": "2026-11-27T02:45:00Z"
       }
     ]
   },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 2,
-    "winning_font": "Anton",
+    "total_recorded": 3,
+    "winning_font": "Bangers",
     "winning_layout": "mrbeast_bottom_slam",
-    "font_stats": {},
-    "layout_stats": {},
+    "font_stats": {
+      "Bangers": {
+        "count": 1,
+        "avg_ctr_proxy": 0.16,
+        "avg_views": 9.0
+      },
+      "Poppins Black": {
+        "count": 1,
+        "avg_ctr_proxy": 0.0,
+        "avg_views": 0.0
+      }
+    },
+    "layout_stats": {
+      "mrbeast_bottom_slam": {
+        "count": 1,
+        "avg_ctr_proxy": 0.16,
+        "avg_views": 9.0
+      },
+      "youtube_clean_pro": {
+        "count": 1,
+        "avg_ctr_proxy": 0.0,
+        "avg_views": 0.0
+      }
+    },
     "records": {
       "TDueM8_uOLE": {
         "font": "Bangers",
@@ -157,8 +189,8 @@
         "topic": "Nvidia AI Chip Restrictions and AI Bubble Risks",
         "is_shorts": true,
         "uploaded_utc": "2026-11-26T22:04:23Z",
-        "views": 0,
-        "ctr_proxy": null
+        "views": 9,
+        "ctr_proxy": 0.16
       },
       "rb0izYGOOko": {
         "font": "Poppins Black",
@@ -168,11 +200,21 @@
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T00:06:07Z",
         "views": 0,
+        "ctr_proxy": 0.0
+      },
+      "4iMi3mW0qy8": {
+        "font": "Oswald",
+        "layout": "top_focus_frame",
+        "accent": "red",
+        "topic": "Trump Economic Claims & Nvidia China GPU Restrictions",
+        "is_shorts": false,
+        "uploaded_utc": "2026-11-27T02:09:31Z",
+        "views": 0,
         "ctr_proxy": null
       }
     }
   },
-  "last_updated_utc": "2026-11-26T23:59:21Z",
+  "last_updated_utc": "2026-11-27T01:56:26Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
