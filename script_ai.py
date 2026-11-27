@@ -1,4 +1,3 @@
-import glob
 import json
 import os
 import random
@@ -9,13 +8,14 @@ import requests
 from config import GEMINI_API_KEY, CHANNEL_NAME
 from learning_engine import fetch_youtube_autocomplete_keywords, load_strategy_memory
 
+# Updated for late-2026 Gemini 3.x endpoints (replaces deprecated 2.5 models)
 PRIORITY_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
     "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-pro-latest",
+    "gemini-flash-latest",
     "gemma-3-27b-it",
 ]
 
@@ -37,7 +37,7 @@ MODE_RSS_FEEDS = {
 }
 
 SHORTS_CASUAL_OUTROS = [
-    f"If you enjoyed this quick breakdown, hit like, share it with a friend, and subscribe to {CHANNEL_NAME}. Thank you for watching.",
+    f"If you enjoyed this quick breakdown, go ahead and hit like, share it with a friend, and subscribe to {CHANNEL_NAME}. Thank you for watching.",
     f"What's your take on this? Drop a quick like, share this video, and subscribe to {CHANNEL_NAME} for more. Thank you for watching.",
     f"Stay ahead of the next big shift. Tap like, share this with someone who needs to see it, and subscribe to {CHANNEL_NAME}. Thank you for watching.",
 ]
@@ -48,7 +48,6 @@ LONG_CASUAL_OUTROS = [
     f"That wraps up today's breakdown. If you liked hanging out with us, drop a like, share this episode, and hit subscribe on {CHANNEL_NAME}. Thank you for watching.",
 ]
 
-# Known high-recognition entities for real Wikimedia photo matching
 KNOWN_ENTITIES = [
     ("jensen huang", "Jensen Huang"),
     ("sam altman", "Sam Altman"),
@@ -59,6 +58,7 @@ KNOWN_ENTITIES = [
     ("mark zuckerberg", "Mark Zuckerberg"),
     ("dario amodei", "Dario Amodei"),
     ("nvidia", "Nvidia"),
+    ("tsmc", "TSMC"),
     ("openai", "OpenAI"),
     ("anthropic", "Anthropic"),
     ("playstation", "PlayStation 5"),
@@ -112,14 +112,14 @@ def _discover_gemini_models():
         if resp.status_code == 200:
             skip_keywords = (
                 "embedding", "aqa", "image", "veo", "tts", "audio",
-                "robotics", "computer-use", "live", "vision", "learnlm",
+                "robotics", "computer-use", "live", "vision", "learnlm", "transcribe",
             )
             for m in resp.json().get("models", []):
                 name = m.get("name", "").replace("models/", "").strip()
                 methods = m.get("supportedGenerationMethods", [])
                 lname = name.lower()
                 if "generateContent" in methods and not any(k in lname for k in skip_keywords):
-                    if any(k in lname for k in ("flash", "pro", "gemma-3")):
+                    if any(k in lname for k in ("flash", "pro", "gemma-3", "gemini-4")):
                         available.add(name)
     except Exception:
         pass
@@ -150,8 +150,8 @@ def _clean_narration(text):
 
 def _auto_enrich_beat(beat):
     """
-    Semantic Beat Analyzer: guarantees exact spoken numbers, market drops/rallies, and real entities
-    always trigger matching live charts, KPI counters, or real photos instead of generic stock clips.
+    Respects physical/demonstration B-roll (e.g., chip manufacturing, shipbuilding, gaming)
+    while automatically upgrading explicit market moves to charts and big figures to KPI counters.
     """
     text = beat.get("text", "")
     low = text.lower()
@@ -162,79 +162,86 @@ def _auto_enrich_beat(beat):
     m_val = str(beat.get("metric_value", "")).strip()
     m_lbl = str(beat.get("metric_label", "")).strip()
     query = str(beat.get("query", "technology")).strip() or "technology"
+    alt_query = str(beat.get("alt_query", "")).strip()
+    screen_tag = str(beat.get("screen_tag", "")).strip().upper()[:24]
 
-    # Extract exact spoken metrics: points, %, or $B/$M/$T
+    # Detect physical/manufacturing/action scenes so we NEVER hijack them with generic charts
+    action_words = (
+        "manufactur", "factory", "assembly", "shipyard", "wafer", "cleanroom", "robotic",
+        "server room", "gameplay", "console", "building", "construction", "cargo", "engine",
+        "warehouse", "laboratory", "shipping", "port", "engineer", "coding", "developer",
+    )
+    is_physical_action = any(w in low or w in query.lower() for w in action_words)
+
     pts_m = re.search(r"\b(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:points?|pts?)\b", low)
     pct_m = re.search(r"(\d+(?:\.\d+)?)\s*(?:%|percent)\b", low)
     dol_m = re.search(r"\$(\d+(?:,\d+)*(?:\.\d+)?)\s*(trillion|billion|million|[tbm])\b", low)
 
     drop_words = ("fell", "fall", "drop", "dropped", "crash", "crashed", "plunge", "plunged", "down", "lost", "slump", "tumbled", "wiped")
-    rise_words = ("rose", "surge", "surged", "jump", "jumped", "rally", "rallied", "soar", "soared", "gained", "climbed", "record high", "up ")
-    mkt_words = ("market", "stock", "index", "s&p", "nasdaq", "dow", "shares", "wall street", "trading", "price", "points", "pts")
+    rise_words = ("rose", "surge", "surged", "jump", "jumped", "rally", "rallied", "soar", "soared", "gained", "climbed", "record high")
+    mkt_words = ("market", "stock", "index", "s&p", "nasdaq", "dow", "shares", "wall street", "trading", "points", "pts")
 
     is_drop = any(w in low for w in drop_words)
     is_rise = any(w in low for w in rise_words)
     is_mkt = any(w in low for w in mkt_words)
 
-    # 1. Exact Market Drop / Rally -> Force live directional Candlestick Chart with exact number!
-    if (is_mkt or pts_m) and (is_drop or is_rise):
-        vtype = "chart_down" if is_drop else "chart_up"
-        sign = "-" if is_drop else "+"
-        if not m_val:
-            if pts_m:
-                m_val = f"{sign}{pts_m.group(1)} PTS"
-            elif pct_m:
-                m_val = f"{sign}{pct_m.group(1)}%"
-            elif dol_m:
-                u = dol_m.group(2)[0].upper()
-                m_val = f"{sign}${dol_m.group(1)}{u}"
-        if not m_lbl:
-            m_lbl = "MARKET SELL-OFF" if is_drop else "MARKET RALLY"
-
-    # 2. Big Standalone Dollar / Percent Stat -> Force Animated KPI Counter Slam!
-    elif vtype in ("stock_video", "editorial_photo") and (dol_m or pct_m):
-        vtype = "kpi_slam"
-        if not m_val:
-            if dol_m:
-                u = dol_m.group(2)[0].upper()
-                m_val = f"-${dol_m.group(1)}{u}" if is_drop else f"${dol_m.group(1)}{u}"
-            elif pct_m:
-                m_val = f"-{pct_m.group(1)}%" if is_drop else f"{pct_m.group(1)}%"
-        if not m_lbl:
-            m_lbl = "MAJOR IMPACT" if is_drop else "KEY FIGURE"
-
-    # 3. Named Real-World Entity -> Force Real Wikimedia/News Entity Spotlight!
-    elif vtype in ("stock_video", "editorial_photo"):
-        for kw, wiki_title in KNOWN_ENTITIES:
-            if kw in low:
-                vtype = "entity_photo"
-                query = wiki_title
-                if not m_lbl:
-                    m_lbl = wiki_title.upper()
-                break
+    if not is_physical_action:
+        if (is_mkt or pts_m) and (is_drop or is_rise):
+            vtype = "chart_down" if is_drop else "chart_up"
+            sign = "-" if is_drop else "+"
+            if not m_val:
+                if pts_m:
+                    m_val = f"{sign}{pts_m.group(1)} PTS"
+                elif pct_m:
+                    m_val = f"{sign}{pct_m.group(1)}%"
+                elif dol_m:
+                    m_val = f"{sign}${dol_m.group(1)}{dol_m.group(2)[0].upper()}"
+            if not m_lbl:
+                m_lbl = "MARKET SELL-OFF" if is_drop else "MARKET RALLY"
+        elif vtype in ("stock_video", "editorial_photo") and (dol_m or pct_m):
+            vtype = "kpi_slam"
+            if not m_val:
+                if dol_m:
+                    u = dol_m.group(2)[0].upper()
+                    m_val = f"-${dol_m.group(1)}{u}" if is_drop else f"${dol_m.group(1)}{u}"
+                elif pct_m:
+                    m_val = f"-{pct_m.group(1)}%" if is_drop else f"{pct_m.group(1)}%"
+            if not m_lbl:
+                m_lbl = "MAJOR IMPACT" if is_drop else "KEY FIGURE"
+        elif vtype == "editorial_photo":
+            for kw, wiki_title in KNOWN_ENTITIES:
+                if kw in low:
+                    vtype = "entity_photo"
+                    query = wiki_title
+                    if not m_lbl:
+                        m_lbl = wiki_title.upper()
+                    break
 
     beat["visual_type"] = vtype
     beat["query"] = query
+    beat["alt_query"] = alt_query
+    beat["screen_tag"] = screen_tag
     beat["metric_value"] = m_val[:16]
     beat["metric_label"] = m_lbl[:34]
     return beat
 
 
 def _split_narration_to_beats(narration, fallback_query, default_vtype="stock_video"):
-    """Splits a flat scene narration into crisp 1-2 sentence beats if Gemini omitted explicit beats."""
     sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", narration) if s.strip()]
     if len(sents) <= 1:
-        return [_auto_enrich_beat({"text": narration, "visual_type": default_vtype, "query": fallback_query, "metric_value": "", "metric_label": ""})]
-    beats = []
-    for s in sents:
-        beats.append(_auto_enrich_beat({
+        return [_auto_enrich_beat({"text": narration, "visual_type": default_vtype, "query": fallback_query, "alt_query": "", "screen_tag": "", "metric_value": "", "metric_label": ""})]
+    return [
+        _auto_enrich_beat({
             "text": s,
             "visual_type": default_vtype,
             "query": fallback_query,
+            "alt_query": "",
+            "screen_tag": "",
             "metric_value": "",
             "metric_label": "",
-        }))
-    return beats
+        })
+        for s in sents
+    ]
 
 
 def _ensure_interactive_and_outro(scenes, is_shorts):
@@ -277,7 +284,9 @@ def _ensure_interactive_and_outro(scenes, is_shorts):
     outro_beat = {
         "text": outro_line,
         "visual_type": "editorial_photo",
-        "query": "dark minimalist studio",
+        "query": "dark modern studio",
+        "alt_query": "abstract dark lights",
+        "screen_tag": "",
         "metric_value": "",
         "metric_label": "LIKE SHARE SUBSCRIBE",
     }
@@ -287,7 +296,7 @@ def _ensure_interactive_and_outro(scenes, is_shorts):
     else:
         scenes.append({
             "narration": outro_line,
-            "visual_query": "dark minimalist studio",
+            "visual_query": "dark modern studio",
             "tone": "calm",
             "highlight_text": "Like, Share & Subscribe",
             "speaker": "main",
@@ -307,7 +316,7 @@ def _build_mode_instructions(mode, is_shorts):
    - Scene 3 (tone: analytical, interactive_type: countdown): Quick 2-second viewer guess prompt (2 beats).
    - Scene 4 (tone: serious, interactive_type: music_drop): Big reveal / twist (2 beats).
    - Scene 5 (tone: urgent, interactive_type: debate): Split debate asking viewers to comment 1 or 2 (2 beats).
-   - Scene 6 (tone: calm): Casual ask to like, share, subscribe + end with "Thank you for watching." (1-2 beats)."""
+   - Scene 6 (tone: calm): Casual ask to like, share, subscribe + end with "Thank you for watching." """
         else:
             structure = """
    24 rich scenes (2-3 beats each = ~60 synced visual cuts, ~1,400 spoken words):
@@ -316,15 +325,15 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 9-13: Internet Reaction + 1 countdown quiz + 1 music_drop reveal.
    - Scenes 14-18: Deeper Psychology & Numbers (+ 1 cohost reality check).
    - Scenes 19-22: Future & 1 debate prompt (Comment 1 or 2).
-   - Scenes 23-24: Warm Outro — like, share, subscribe + "Thank you for watching." """
+   - Scenes 23-24: Warm Outro — casual like, share, subscribe + "Thank you for watching." """
         return role_desc, structure
 
     if mode == "deep_dive_evergreen":
-        role_desc = "High-RPM Evergreen & Documentary Storyteller — finance, AI strategy, and business models."
+        role_desc = "High-RPM Evergreen & Documentary Storyteller — finance, AI strategy, engineering & business."
         if is_shorts:
             structure = """
-   - Scene 1 (tone: hook): High-curiosity money/strategy hook (2 beats).
-   - Scene 2 (tone: analytical): How the business mechanics really work (2 beats).
+   - Scene 1 (tone: hook): High-curiosity hook (2 beats).
+   - Scene 2 (tone: analytical): Concrete real-world demonstration of how it works (2 beats).
    - Scene 3 (tone: urgent, interactive_type: countdown): Ask viewers to guess the key stat in 2 seconds (2 beats).
    - Scene 4 (tone: serious, interactive_type: music_drop): Shocking number / hidden catch reveal (2 beats).
    - Scene 5 (tone: excited, interactive_type: debate): Pick side 1 or 2 in comments (2 beats).
@@ -332,19 +341,19 @@ def _build_mode_instructions(mode, is_shorts):
         else:
             structure = """
    24 rich scenes (2-3 beats each = ~60 synced visual cuts, ~1,400 spoken words):
-   - Scenes 1-3: Irresistible Hook with concrete stat or contradiction.
-   - Scenes 4-8: Core Mechanics (+ 1 cohost analyst stat check).
+   - Scenes 1-3: Irresistible Hook with concrete real-world stakes.
+   - Scenes 4-8: Core Mechanics & Real Demonstration (+ 1 cohost analyst stat check).
    - Scenes 9-13: Hard Numbers + 1 countdown quiz + 1 music_drop reveal.
-   - Scenes 14-18: Hidden Risks & Competition (+ 1 cohost counter-point).
+   - Scenes 14-18: Hidden Bottlenecks & Competition (+ 1 cohost counter-point).
    - Scenes 19-22: Future Outlook + 1 debate prompt (Comment 1 or 2).
-   - Scenes 23-24: Warm Outro — like, share, subscribe + "Thank you for watching." """
+   - Scenes 23-24: Warm Outro — casual like, share, subscribe + "Thank you for watching." """
         return role_desc, structure
 
     role_desc = "Broadcast News & Markets Host — Gaming, Tech, AI & Markets like Vox/ColdFusion."
     if is_shorts:
         structure = """
    - Scene 1 (tone: hook): Fast breaking hook across Tech, AI, Gaming, or Markets (2 beats).
-   - Scene 2 (tone: urgent): Key numbers & market reaction (2 beats).
+   - Scene 2 (tone: urgent): Real-world visual context & key facts (2 beats).
    - Scene 3 (tone: analytical, interactive_type: countdown): Quick 2-second guess prompt (2 beats).
    - Scene 4 (tone: serious, interactive_type: music_drop): Hidden twist or financial catch (2 beats).
    - Scene 5 (tone: excited, interactive_type: debate): Clear 1-vs-2 debate for comments (2 beats).
@@ -355,14 +364,14 @@ def _build_mode_instructions(mode, is_shorts):
    - Scenes 1-3: Opening Hook — straight into today's biggest shift.
    - Scenes 4-8: Tech & AI Segment (+ 1 cohost stat interrupt).
    - Scenes 9-13: Gaming Segment + 1 countdown quiz + 1 music_drop reveal.
-   - Scenes 14-18: Market & Business Segment (exact point/percent moves + 1 cohost reality check).
+   - Scenes 14-18: Market & Business Segment (+ 1 cohost reality check).
    - Scenes 19-22: Cross-Sector Impact + 1 debate prompt (Comment 1 or 2).
-   - Scenes 23-24: Warm Sign-Off — like, share, subscribe + "Thank you for watching." """
+   - Scenes 23-24: Warm Sign-Off — casual like, share, subscribe + "Thank you for watching." """
     return role_desc, structure
 
 
 def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts, seo_keywords):
-    print("[ScriptAI] All AI pools overloaded (503) — activating Beat-Synced Live Headlines Backup!")
+    print("[ScriptAI] AI pools overloaded — activating Beat-Synced Live Headlines Backup!")
     clean_heads = []
     for raw in combined_topics:
         h = re.sub(r"\s+-\s+[^-]+$", "", raw).strip()
@@ -372,7 +381,7 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
 
     if not clean_heads:
         clean_heads = [
-            custom_topic or "Tech stocks fell by 100 points as Nvidia faces fresh AI supply pressure",
+            custom_topic or "Semiconductor factories race to build next-gen AI chips",
             "Gaming studios rethink next-gen releases amid rising hardware costs",
             "Wall Street watches cloud AI spending hit $40 billion this quarter",
             "OpenAI and Google accelerate next-generation developer tools",
@@ -384,54 +393,12 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
     s4 = clean_heads[3 % len(clean_heads)]
 
     raw_scenes = [
-        {
-            "narration": f"Big moves just hit the tech radar today. {lead_story}.",
-            "visual_query": "breaking news tech",
-            "tone": "hook",
-            "highlight_text": lead_story[:68],
-            "speaker": "main",
-            "interactive_type": "none",
-        },
-        {
-            "narration": f"Look closer at what's happening right now. {s2}. That shift is forcing major rivals to react fast.",
-            "visual_query": "ai data center",
-            "tone": "urgent",
-            "highlight_text": s2[:68],
-            "speaker": "main",
-            "interactive_type": "none",
-        },
-        {
-            "narration": f"Pause for two seconds and ask yourself: is Wall Street overreacting here? {s3}.",
-            "visual_query": "stock trading chart",
-            "tone": "analytical",
-            "highlight_text": "Overreaction or just starting?",
-            "speaker": "main",
-            "interactive_type": "countdown",
-        },
-        {
-            "narration": f"Here's the twist most people miss at first glance. {s4}. Numbers like these rarely stay quiet.",
-            "visual_query": "gaming hardware neon",
-            "tone": "serious",
-            "highlight_text": s4[:68],
-            "speaker": "main",
-            "interactive_type": "music_drop",
-        },
-        {
-            "narration": "So where do you stand right now? Comment 1 if this is a real breakthrough, or 2 if it's pure hype.",
-            "visual_query": "microchip technology",
-            "tone": "excited",
-            "highlight_text": "Real Shift vs Pure Hype",
-            "speaker": "main",
-            "interactive_type": "debate",
-        },
-        {
-            "narration": random.choice(SHORTS_CASUAL_OUTROS),
-            "visual_query": "dark minimalist studio",
-            "tone": "calm",
-            "highlight_text": "Like, Share & Subscribe",
-            "speaker": "main",
-            "interactive_type": "none",
-        },
+        {"narration": f"Big moves just hit the tech radar today. {lead_story}.", "visual_query": "microchip factory", "tone": "hook", "highlight_text": lead_story[:68], "speaker": "main", "interactive_type": "none"},
+        {"narration": f"Look closer at what's happening right now. {s2}. That shift is forcing rivals to move fast.", "visual_query": "data center server", "tone": "urgent", "highlight_text": s2[:68], "speaker": "main", "interactive_type": "none"},
+        {"narration": f"Pause for two seconds and ask yourself: is Wall Street overreacting here? {s3}.", "visual_query": "stock trading floor", "tone": "analytical", "highlight_text": "Overreaction or just starting?", "speaker": "main", "interactive_type": "countdown"},
+        {"narration": f"Here's the twist most people miss at first glance. {s4}. Numbers like these rarely stay quiet.", "visual_query": "computer hardware engineer", "tone": "serious", "highlight_text": s4[:68], "speaker": "main", "interactive_type": "music_drop"},
+        {"narration": "So where do you stand right now? Comment 1 if this is a real breakthrough, or 2 if it's pure hype.", "visual_query": "silicon wafer", "tone": "excited", "highlight_text": "Real Shift vs Pure Hype", "speaker": "main", "interactive_type": "debate"},
+        {"narration": random.choice(SHORTS_CASUAL_OUTROS), "visual_query": "dark modern studio", "tone": "calm", "highlight_text": "Like, Share & Subscribe", "speaker": "main", "interactive_type": "none"},
     ]
 
     if not is_shorts:
@@ -440,7 +407,7 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
             h_pick = clean_heads[k % len(clean_heads)]
             raw_scenes.append({
                 "narration": f"Another major story shaping today's market: {h_pick}. When you connect tech, gaming, and capital markets, the bigger pattern becomes impossible to ignore.",
-                "visual_query": "stock market chart" if k % 2 == 0 else "modern gaming hardware",
+                "visual_query": "microchip assembly factory" if k % 2 == 0 else "gaming studio developers",
                 "tone": "hook" if k == 0 else ("urgent" if k % 3 == 1 else "analytical"),
                 "highlight_text": h_pick[:68],
                 "speaker": "cohost" if k in (5, 11, 17, 20) else "main",
@@ -448,7 +415,7 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
             })
         raw_scenes.append({
             "narration": random.choice(LONG_CASUAL_OUTROS),
-            "visual_query": "dark minimalist studio",
+            "visual_query": "dark modern studio",
             "tone": "calm",
             "highlight_text": "Like, Share & Subscribe",
             "speaker": "main",
@@ -462,23 +429,20 @@ def _build_emergency_headline_blueprint(combined_topics, custom_topic, is_shorts
     if is_shorts and "#shorts" not in title.lower():
         title += " #Shorts"
 
-    tags = list(dict.fromkeys((seo_keywords or []) + ["tech news", "ai news", "gaming news", "stock market"]))[:18]
+    tags = list(dict.fromkeys((seo_keywords or []) + ["tech news", "ai news", "gaming news", "stock market"]))[:16]
     return {
         "chosen_topic": lead_story,
         "category": "tech",
-        "bulletin_badge": "DAILY BULLETIN",
+        "bulletin_badge": "DAILY BRIEF",
         "title": title,
         "description": f"{lead_story}\n\nDaily Tech, AI, Gaming & Market Briefing by {CHANNEL_NAME}.\n\n#TechNews #AINews #Markets #QuickShiftCreative",
         "tags": tags,
-        "thumbnail_headline": lead_story.upper()[:30],
+        "thumbnail_headline": lead_story.upper()[:24],
         "thumbnail_subtext": "TECH • AI • MARKETS",
-        "thumbnail_query": "technology market",
+        "thumbnail_query": "microchip factory",
+        "thumbnail_scene_prompt": f"Dramatic cinematic photography depicting {lead_story}, sharp central subject, high contrast studio rim lighting, clean space at the top, zero text.",
         "pinned_comment": "Quick vote: Comment 1 if you think this shift is real, or 2 if it's overhyped! 👇",
-        "debate_card": {
-            "option_a": "REAL BREAKTHROUGH",
-            "option_b": "PURE HYPE",
-            "question": "COMMENT 1 OR 2 BELOW",
-        },
+        "debate_card": {"option_a": "REAL BREAKTHROUGH", "option_b": "PURE HYPE", "question": "COMMENT 1 OR 2 BELOW"},
         "music_direction": {
             "music_query": "ambient technology electronic loop",
             "track_file": "auto",
@@ -542,7 +506,7 @@ def generate_video_blueprint(trending_topics, custom_topic=""):
     role_desc, structure_guide = _build_mode_instructions(content_mode, is_shorts)
     format_label = "YouTube Shorts (9:16 vertical, ~58s)" if is_shorts else "Long-Form Horizontal YouTube Video (16:9, 8.5-10 min)"
 
-    prompt = f"""You are the {role_desc} and Lead Video Editor for "{CHANNEL_NAME}".
+    prompt = f"""You are the {role_desc} and Senior Documentary Video Editor for "{CHANNEL_NAME}".
 {mem_hint}
 {comment_hint}
 
@@ -552,42 +516,43 @@ LIVE US YOUTUBE SEARCH KEYWORDS (weave naturally into Title, SEO Description & T
 Active Mode: {content_mode.upper()}
 Format: {format_label}
 Target Length: {duration_hint}
-Structure: EXACTLY {scene_count} scenes, and EACH scene MUST have a `"beats"` array with {beats_per_scene} micro-beats ({words_per_beat} spoken words per beat).
+Structure: EXACTLY {scene_count} scenes, EACH with a `"beats"` array of {beats_per_scene} micro-beats ({words_per_beat} spoken words per beat).
 
 Scene Structure Guide:
 {structure_guide}
 
 {topic_block}
 
-EXACT BEAT-BY-BEAT VISUAL SYNC RULES (100X CRITICAL):
-Every single beat represents 1 exact visual cut synced to the exact millisecond the narrator speaks that line!
-For EACH beat in `"beats"`, set `"visual_type"` strictly to the BEST match for what is being spoken:
-- `"chart_down"`: Whenever mentioning a market drop, stock crash, falling points, or revenue loss (set `"metric_value"` like `"-100 PTS"` or `"-8.5%"`, `"metric_label"` like `"NASDAQ DROP"`, `"query"` to ticker/company like `"NVDA"` or `"SPY"`).
-- `"chart_up"`: Whenever mentioning a rally, surge, growth, or jump (set `"metric_value"` like `"+14%"`, `"metric_label"` like `"STOCK RALLY"`, `"query"` to ticker/company).
-- `"kpi_slam"`: Whenever mentioning a dramatic standalone number, price, or stat (set `"metric_value"` like `"$40B"` or `"300%"`, `"metric_label"` like `"AI SPENDING"`).
-- `"entity_photo"`: Whenever naming a specific person, company, product, or game — set `"query"` to their exact Wikipedia name (e.g., `"Jensen Huang"`, `"Nvidia"`, `"PlayStation 5"`, `"Elon Musk"`, `"OpenAI"`, `"Grand Theft Auto VI"`).
-- `"news_card"`: For major breaking headline reveals (set `"metric_label"` to a punchy 4-6 word headline).
-- `"stock_video"`: For general action/mood B-roll — `"query"` MUST be ONLY 2-3 simple stock words (e.g., `"server room"`, `"stock traders"`, `"gaming setup"` — NEVER write long sentences!).
-- `"editorial_photo"`: For clean HD photo backdrop — `"query"` MUST be ONLY 2-3 simple words.
+100X LITERAL VISUAL-TO-VOICE MATCHING RULES (CRITICAL — MAKE IT LOOK HUMAN-EDITED!):
+Every single beat MUST show the EXACT physical subject or concept being spoken in that exact sentence:
+- Example 1: If the narrator talks about chip manufacturing -> `visual_type: "stock_video"`, `query: "semiconductor factory cleanroom"`, `alt_query: "microchip silicon wafer"`, `screen_tag: "CHIP FABRICATION"`.
+- Example 2: If the narrator talks about ship manufacturing -> `visual_type: "stock_video"`, `query: "shipyard cargo construction"`, `alt_query: "welding industrial shipyard"`, `screen_tag: "SHIPBUILDING"`.
+- Example 3: If the narrator talks about a stock market drop (-100 points) -> `visual_type: "chart_down"`, `query: "SPY"`, `metric_value: "-100 PTS"`, `metric_label: "S&P 500 DROP"`.
+- Example 4: If the narrator mentions a huge standalone number ($40B) -> `visual_type: "kpi_slam"`, `metric_value: "$40B"`, `metric_label: "AI CAPEX SPEND"`.
+- Example 5: If the narrator names a specific person, company, or game -> `visual_type: "entity_photo"`, `query: "Jensen Huang"` (exact Wikipedia name), `metric_label: "NVIDIA CEO"`.
+- IMPORTANT: Use `stock_video` (with concrete 2-3 word real-world filming keywords in BOTH `query` and `alt_query`) for 60-70% of beats so the video plays like a real documentary. Only use `chart_down`/`chart_up` for actual stock/market price moves! NEVER write generic queries like "technology abstract" when a concrete real-world visual exists.
+- `screen_tag`: Optional 2-3 word uppercase editorial context label (e.g., "WAFER FAB", "WALL STREET", "GAME STUDIO") on key B-roll beats (leave empty `""` on ordinary transitions).
 
-Human-Like Voice & SEO Rules:
-- Use natural US contractions ("don't", "here's", "that's", "you're") and punchy human phrasing. NEVER use AI clichés ("delve", "game-changer", "landscape", "buckle up", "revolutionary", "in conclusion", "welcome back").
-- FINAL SCENE OUTRO: Casual, warm invite to like, share, and subscribe to {CHANNEL_NAME}, ending with "Thank you for watching."
-- `thumbnail_headline`: ULTRA-SHORT 2 to 4 bold power words matching the exact topic (zero clickbait).
-- `tags`: 14-18 short, clean US search keywords (no # symbols).
+Human-Like Voice, Thumbnail & SEO Rules:
+- Sound 95% human: use natural US contractions ("don't", "here's", "that's", "you're"), short punchy reactions, zero AI clichés ("delve", "game-changer", "landscape", "buckle up", "revolutionary", "in conclusion", "welcome back").
+- FINAL SCENE OUTRO: Relaxed, warm invite to like, share, and subscribe to {CHANNEL_NAME}, ending clearly with "Thank you for watching."
+- `thumbnail_headline`: ULTRA-SHORT 2 to 3 bold power words (e.g. "CHIP WAR 2026", "NVIDIA'S TRAP", "$40B MISTAKE") — 100% honest to the video topic, zero clickbait.
+- `thumbnail_scene_prompt`: One vivid 20-30 word photographic prompt describing a dramatic MrBeast-style real-world scene matching the exact video topic (subject positioned in center/lower-center, vibrant cinematic lighting, clean dark/soft negative space at the TOP for headline, STRICTLY NO TEXT in the image).
+- `tags`: 14-16 short, clean US search keywords (no # symbols).
 - `speaker`: `"main"` normally; {'for Long videos set `"cohost"` on 3-4 analytical stat-check scenes.' if not is_shorts else 'keep `"main"` for Shorts.'}
 
 Return ONLY valid JSON:
 {{
   "chosen_topic": "string",
   "category": "tech",
-  "bulletin_badge": "DAILY BULLETIN",
+  "bulletin_badge": "DAILY BRIEF",
   "title": "string",
   "description": "string",
   "tags": ["kw1", "kw2"],
-  "thumbnail_headline": "NVIDIA SHOCK DROP",
-  "thumbnail_subtext": "REAL IMPACT",
-  "thumbnail_query": "nvidia chip",
+  "thumbnail_headline": "CHIP SHOCK",
+  "thumbnail_subtext": "INSIDE THE FAB",
+  "thumbnail_query": "semiconductor cleanroom",
+  "thumbnail_scene_prompt": "Ultra-sharp photorealistic editorial photograph of a glowing golden silicon microchip wafer held in a dark blue cleanroom with dramatic studio lighting, sharp focus in lower-center, clean dark space at the top, no text or letters.",
   "pinned_comment": "string",
   "debate_card": {{
     "option_a": "REAL SHIFT",
@@ -610,18 +575,13 @@ Return ONLY valid JSON:
       "highlight_text": "Short 5-word highlight",
       "beats": [
         {{
-          "text": "The market just fell by 100 points in under an hour.",
-          "visual_type": "chart_down",
-          "query": "SPY",
-          "metric_value": "-100 PTS",
-          "metric_label": "S&P 500 DROP"
-        }},
-        {{
-          "text": "And Jensen Huang just stepped right into the middle of the storm.",
-          "visual_type": "entity_photo",
-          "query": "Jensen Huang",
+          "text": "Inside these sterile cleanrooms, a single silicon wafer takes months to manufacture.",
+          "visual_type": "stock_video",
+          "query": "semiconductor cleanroom wafer",
+          "alt_query": "microchip factory manufacturing",
+          "screen_tag": "CHIP FABRICATION",
           "metric_value": "",
-          "metric_label": "NVIDIA CEO"
+          "metric_label": ""
         }}
       ]
     }}
@@ -629,7 +589,7 @@ Return ONLY valid JSON:
 }}
 """
 
-    max_tokens = 3800 if is_shorts else 8192
+    max_tokens = 4000 if is_shorts else 8192
     models_to_try = _discover_gemini_models()
     last_error = None
     valid_tones = {"hook", "urgent", "excited", "serious", "analytical", "calm"}
@@ -637,7 +597,7 @@ Return ONLY valid JSON:
 
     for model in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-        gen_cfg = {"temperature": 0.75, "maxOutputTokens": max_tokens}
+        gen_cfg = {"temperature": 0.74, "maxOutputTokens": max_tokens}
         if "gemma" not in model.lower():
             gen_cfg["responseMimeType"] = "application/json"
 
@@ -662,17 +622,21 @@ Return ONLY valid JSON:
 
                 cat = str(blueprint.get("category", "tech")).strip().lower()
                 blueprint["category"] = cat if cat in ("ai", "tech", "gaming") else "tech"
-                blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "DAILY BULLETIN")).upper().strip()[:18]
+                blueprint["bulletin_badge"] = str(blueprint.get("bulletin_badge", "DAILY BRIEF")).upper().strip()[:18]
                 blueprint["title"] = blueprint["title"].strip()[:98]
                 if is_shorts and "#shorts" not in blueprint["title"].lower() and len(blueprint["title"]) <= 90:
                     blueprint["title"] += " #Shorts"
 
                 raw_tags = [str(t).strip() for t in (blueprint.get("tags") or []) if str(t).strip()]
-                blueprint["tags"] = list(dict.fromkeys(raw_tags + live_seo_keywords))[:18]
+                blueprint["tags"] = list(dict.fromkeys(raw_tags + live_seo_keywords))[:16]
 
                 blueprint["pinned_comment"] = str(
                     blueprint.get("pinned_comment", "What's your take — comment 1 or 2 below! 👇")
                 ).strip()[:280]
+
+                blueprint["thumbnail_scene_prompt"] = str(
+                    blueprint.get("thumbnail_scene_prompt", "")
+                ).strip()[:360]
 
                 dc = blueprint.get("debate_card") or {}
                 blueprint["debate_card"] = {
@@ -718,6 +682,8 @@ Return ONLY valid JSON:
                             "text": b_txt,
                             "visual_type": b.get("visual_type", "stock_video"),
                             "query": b.get("query", sc.get("visual_query", "technology")),
+                            "alt_query": b.get("alt_query", ""),
+                            "screen_tag": b.get("screen_tag", ""),
                             "metric_value": b.get("metric_value", ""),
                             "metric_label": b.get("metric_label", ""),
                         }))
@@ -744,8 +710,8 @@ Return ONLY valid JSON:
                 if not blueprint["scenes"]:
                     raise ValueError("Empty scenes")
                 print(
-                    f"[ScriptAI] Beat-Synced Blueprint ready with {model} "
-                    f"({len(blueprint['scenes'])} scenes -> {total_beats} exact visual beats)"
+                    f"[ScriptAI] Visual-Director Blueprint ready with {model} "
+                    f"({len(blueprint['scenes'])} scenes -> {total_beats} synced beats)"
                 )
                 return blueprint
             except Exception as e:
