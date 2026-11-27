@@ -14,7 +14,6 @@ from media_fetcher import (
     fetch_broll_clip,
     fetch_freesound_music,
     fetch_freesound_sfx,
-    fetch_giphy_sticker,
     fetch_stock_image,
     fetch_wikimedia_entity_image,
 )
@@ -31,6 +30,22 @@ def _run_ffmpeg(cmd):
         err_msg = (e.stderr or b"").decode("utf-8", errors="ignore")[-900:]
         print(f"[FFmpeg Error] {err_msg}")
         raise
+
+
+def _probe_duration(media_path):
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                media_path,
+            ],
+            text=True,
+        ).strip()
+        return float(out)
+    except Exception:
+        return 0.0
 
 
 def _all_sfx_files():
@@ -100,14 +115,11 @@ def _compute_safe_music_volume(music_direction, is_shorts):
     intensity = str(md.get("intensity", "balanced")).strip().lower()
     base_map = {"subtle": 0.068, "balanced": 0.088, "energetic": 0.108}
     vol = base_map.get(intensity, 0.085)
-
     if "volume_scale" in md:
         try:
-            ai_vol = float(md["volume_scale"])
-            vol = (vol + ai_vol) / 2.0
+            vol = (vol + float(md["volume_scale"])) / 2.0
         except Exception:
             pass
-
     if is_shorts:
         vol += 0.012
     return round(max(0.058, min(0.120, vol)), 3)
@@ -139,7 +151,6 @@ def _create_progress_bar_png(out_png, width, bar_h=10):
 
 
 def _create_brand_watermark_png(out_png, width, height):
-    """Creates a subtle translucent channel watermark in top-right corner."""
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
     lbl = (CHANNEL_NAME or "QUICK SHIFT CREATIVE").upper()
@@ -150,6 +161,37 @@ def _create_brand_watermark_png(out_png, width, height):
     y = 32 if height > width else 24
     draw.text((x + 2, y + 2), lbl, font=f, fill=(0, 0, 0, 85))
     draw.text((x, y), lbl, font=f, fill=(255, 255, 255, 95))
+    canvas.save(out_png, "PNG")
+    return out_png
+
+
+def _create_editorial_tag_png(out_png, width, height, tag_text):
+    """Sleek Premiere-Pro style top-left editorial context badge (zero clutter, human documentary feel)."""
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    lbl = str(tag_text or "").strip().upper()[:24]
+    if not lbl:
+        return None
+    f = _find_font(22 if height > width else 24)
+    bbox = draw.textbbox((0, 0), lbl, font=f)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    x0 = 36 if height > width else 46
+    y0 = 110 if height > width else 42
+    pad_x, pad_y = 20, 12
+
+    draw.rounded_rectangle(
+        [x0, y0, x0 + tw + pad_x * 2 + 12, y0 + th + pad_y * 2],
+        radius=12,
+        fill=(10, 14, 22, 215),
+        outline=(255, 255, 255, 45),
+        width=2,
+    )
+    draw.rounded_rectangle(
+        [x0, y0, x0 + 9, y0 + th + pad_y * 2],
+        radius=4,
+        fill=(250, 204, 21, 255),
+    )
+    draw.text((x0 + pad_x + 6, y0 + pad_y - 1), lbl, font=f, fill=(246, 248, 252, 255))
     canvas.save(out_png, "PNG")
     return out_png
 
@@ -177,7 +219,6 @@ def _create_countdown_card_png(out_png, width, height, prompt_text):
     txt = (prompt_text or "What do you think happens next?")[:46]
     _draw_centered_text(draw, cx, y0 + 96, txt, _find_font(34 if is_vertical else 38), white)
     _draw_centered_text(draw, cx, y1 - 54, "Drop your guess before the reveal...", _find_font(22), gold)
-
     canvas.save(out_png, "PNG")
     return out_png
 
@@ -229,50 +270,61 @@ def _create_debate_card_png(out_png, width, height, debate_card):
 
 
 def _create_outro_card_png(out_png, width, height):
-    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    """
+    Properly centered, full-screen dark studio Outro overlay positioned cleanly in the
+    upper-middle safe zone (zero collision with captions or YouTube end-screen cards).
+    """
+    canvas = Image.new("RGBA", (width, height), (6, 9, 16, 175))
     draw = ImageDraw.Draw(canvas)
     is_vertical = height > width
-
-    box_w = int(width * 0.86) if is_vertical else min(int(width * 0.62), 1080)
-    box_h = 370 if is_vertical else 310
-    x0 = (width - box_w) // 2
-    y0 = int(height * 0.22) if is_vertical else int(height * 0.17)
-    x1, y1 = x0 + box_w, y0 + box_h
     cx = width // 2
 
+    box_w = int(width * 0.88) if is_vertical else min(int(width * 0.66), 1180)
+    box_h = 460 if is_vertical else 390
+    x0 = (width - box_w) // 2
+    y0 = int(height * 0.24) if is_vertical else int(height * 0.18)
+    x1, y1 = x0 + box_w, y0 + box_h
+
     gold = (250, 204, 21, 255)
-    bg = (12, 15, 22, 236)
+    yt_red = (235, 32, 48, 255)
+    bg = (12, 16, 24, 245)
     white = (248, 250, 252, 255)
-    muted = (198, 206, 220, 255)
+    muted = (190, 200, 218, 255)
 
-    draw.rounded_rectangle([x0, y0, x1, y1], radius=28, fill=bg, outline=gold, width=3)
-    draw.rounded_rectangle([x0, y0, x1, y0 + 10], radius=6, fill=gold)
+    draw.rounded_rectangle([x0 + 8, y0 + 10, x1 + 8, y1 + 10], radius=30, fill=(0, 0, 0, 180))
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=30, fill=bg, outline=gold, width=4)
+    draw.rounded_rectangle([x0, y0, x1, y0 + 12], radius=6, fill=gold)
 
-    f_title = _find_font(48 if is_vertical else 52)
-    f_sub = _find_font(28 if is_vertical else 30)
-    f_pill = _find_font(24 if is_vertical else 26)
+    f_title = _find_font(54 if is_vertical else 60)
+    f_chan = _find_font(30 if is_vertical else 32)
+    f_pill = _find_font(26 if is_vertical else 28)
+    f_foot = _find_font(24)
 
-    _draw_centered_text(draw, cx, y0 + 38, "THANK YOU FOR WATCHING", f_title, white)
-    _draw_centered_text(draw, cx, y0 + 112, (CHANNEL_NAME or "Quick Shift Creative").upper(), f_sub, gold)
+    _draw_centered_text(draw, cx, y0 + 46, "THANK YOU FOR WATCHING", f_title, white)
+    _draw_centered_text(draw, cx, y0 + 126, (CHANNEL_NAME or "Quick Shift Creative").upper(), f_chan, gold)
 
-    pills = ["LIKE", "SHARE", "SUBSCRIBE"]
-    pill_w = 215 if is_vertical else 240
-    pill_h = 62
-    gap = 24
+    # Subtle divider line
+    draw.line([(x0 + 80, y0 + 178), (x1 - 80, y0 + 178)], fill=(55, 68, 92, 200), width=2)
+
+    # Three crisp CTA buttons: LIKE | SHARE | SUBSCRIBE (YouTube Red)
+    pills = [
+        ("LIKE", (26, 34, 50, 255), white, gold),
+        ("SHARE", (26, 34, 50, 255), white, gold),
+        ("SUBSCRIBE", yt_red, white, (255, 160, 170, 255)),
+    ]
+    pill_w = 240 if is_vertical else 270
+    pill_h = 74
+    gap = 26
     total_pw = len(pills) * pill_w + (len(pills) - 1) * gap
     px = cx - total_pw // 2
-    py = y0 + (190 if is_vertical else 178)
+    py = y0 + (222 if is_vertical else 212)
 
-    for idx_p, lbl in enumerate(pills):
-        is_sub = (idx_p == 2)
-        p_fill = gold if is_sub else (28, 34, 48, 245)
-        p_txt = (10, 12, 16, 255) if is_sub else white
-        p_out = gold if not is_sub else (255, 235, 130, 255)
-        draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=16, fill=p_fill, outline=p_out, width=2)
-        _draw_centered_text(draw, px + pill_w // 2, py + 16, lbl, f_pill, p_txt)
+    for lbl, p_fill, p_txt, p_out in pills:
+        draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=18, fill=p_fill, outline=p_out, width=3)
+        _draw_centered_text(draw, px + pill_w // 2, py + 21, lbl, f_pill, p_txt)
         px += pill_w + gap
 
-    _draw_centered_text(draw, cx, y1 - 56, "See you in the next update", _find_font(22), muted)
+    _draw_centered_text(draw, cx, y1 - 68, "Hit the bell so you never miss the next breakdown", f_foot, muted)
     canvas.save(out_png, "PNG")
     return out_png
 
@@ -395,9 +447,8 @@ def _render_media_beat(
     out_mp4,
     width,
     height,
-    is_shorts,
     overlay_png=None,
-    gif_path=None,
+    fade_overlay=False,
     is_motion_graphic=False,
 ):
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
@@ -420,7 +471,7 @@ def _render_media_beat(
                 f"crop={scale_w}:{scale_h}",
                 f"zoompan=z='min({zoom_end}, 1.0+({zoom_end}-1.0)*on/{max(1,n_frames)})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n_frames}:s={width}x{height}:fps={fps}",
                 "setsar=1",
-                "eq=contrast=1.07:brightness=-0.03:saturation=1.06",
+                "eq=contrast=1.06:brightness=-0.02:saturation=1.08",
                 "vignette=PI/7",
             ]
         elif is_motion_graphic:
@@ -434,37 +485,31 @@ def _render_media_beat(
         else:
             inp_args.extend(["-stream_loop", "-1", "-i", src_media])
             vf_parts = [
-                "trim=start=0.35",
+                "trim=start=0.30",
                 "setpts=PTS-STARTPTS",
                 f"scale={width}:{height}:force_original_aspect_ratio=increase",
                 f"crop={width}:{height}",
                 f"fps={fps}",
                 "setsar=1",
-                "eq=contrast=1.07:brightness=-0.03:saturation=1.06",
+                "eq=contrast=1.06:brightness=-0.02:saturation=1.08",
                 "vignette=PI/7",
             ]
         filter_chain.append(f"[0:v]{','.join(vf_parts)}[base]")
         next_inp = 1
     else:
-        filter_chain.append(f"color=c=0x0b0e14:s={width}x{height}:r={fps}:d={dur:.2f}[base]")
+        filter_chain.append(f"color=c=0x0b0e14:s={width}x{height}:r={fps}:d={dur:.3f}[base]")
         next_inp = 0
 
     cur_label = "[base]"
 
     if overlay_png and os.path.exists(overlay_png):
-        inp_args.extend(["-i", overlay_png])
-        filter_chain.append(f"{cur_label}[{next_inp}:v]overlay=0:0:shortest=1[ov1]")
+        inp_args.extend(["-loop", "1", "-t", f"{dur:.3f}", "-i", overlay_png])
+        if fade_overlay:
+            filter_chain.append(f"[{next_inp}:v]format=rgba,fade=t=in:st=0:d=0.45:alpha=1[ovf]")
+            filter_chain.append(f"{cur_label}[ovf]overlay=0:0:shortest=1[ov1]")
+        else:
+            filter_chain.append(f"{cur_label}[{next_inp}:v]overlay=0:0:shortest=1[ov1]")
         cur_label = "[ov1]"
-        next_inp += 1
-
-    if gif_path and os.path.exists(gif_path):
-        inp_args.extend(["-ignore_loop", "0", "-i", gif_path])
-        gw = 210 if not is_shorts else 190
-        gx = width - gw - 36
-        gy = 78 if not is_shorts else 120
-        filter_chain.append(f"[{next_inp}:v]scale={gw}:-1:flags=lanczos,format=rgba[gf]")
-        filter_chain.append(f"{cur_label}[gf]overlay={gx}:{gy}:shortest=1[ov2]")
-        cur_label = "[ov2]"
         next_inp += 1
 
     final_map = cur_label.strip("[]")
@@ -474,6 +519,7 @@ def _render_media_beat(
         "-filter_complex", ";".join(filter_chain),
         "-map", f"[{final_map}]",
         "-t", f"{dur:.3f}",
+        "-r", str(fps),
         "-an",
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -590,7 +636,7 @@ def _master_voice_and_music(
             m_norm,
         ])
         inputs.extend(["-i", m_norm])
-        fade_out_d = 2.0 if not is_shorts else 1.6
+        fade_out_d = 2.2 if not is_shorts else 1.8
         fade_out_st = max(0.5, total_dur - fade_out_d)
 
         drop_filters = ""
@@ -615,8 +661,8 @@ def _master_voice_and_music(
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_impact, events.get("impact", []), 1.15, 0.22, "im")
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_tick, events.get("tick", []), 1.7, 0.22, "tk")
 
-    final_afade_st = max(0.5, total_dur - 1.0)
-    parts.append(f"{cur_v}alimiter=limit=0.95,afade=t=out:st={final_afade_st:.2f}:d=1.0[am_final]")
+    final_afade_st = max(0.5, total_dur - 1.2)
+    parts.append(f"{cur_v}alimiter=limit=0.95,afade=t=out:st={final_afade_st:.2f}:d=1.2[am_final]")
 
     cmd = [
         "ffmpeg", "-y",
@@ -631,19 +677,15 @@ def _master_voice_and_music(
 
 
 def _burn_subtitles_watermark_and_fade(video_mp4, subtitle_path, out_mp4, is_shorts, total_dur, work_dir):
-    """Burns word-pop captions, subtle brand watermark, Shorts gold progress bar, and smooth fade-in/fade-out."""
     width, height = (1080, 1920) if is_shorts else (1920, 1080)
-    fade_d = 1.2
+    fade_d = 1.4
     fade_st = max(0.2, float(total_dur) - fade_d)
     fade_chain = f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_st:.2f}:d={fade_d:.2f}"
 
     sub_filter = ""
     if subtitle_path and os.path.exists(subtitle_path) and os.path.getsize(subtitle_path) > 0:
         escaped = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
-        if subtitle_path.lower().endswith(".ass"):
-            sub_filter = f"ass='{escaped}'"
-        else:
-            sub_filter = f"subtitles='{escaped}'"
+        sub_filter = f"ass='{escaped}'" if subtitle_path.lower().endswith(".ass") else f"subtitles='{escaped}'"
 
     wm_png = os.path.join(work_dir, "brand_wm.png")
     _create_brand_watermark_png(wm_png, width, height)
@@ -695,12 +737,6 @@ def build_final_video(
     chosen_topic="",
     debate_card=None,
 ):
-    """
-    100x Beat-by-Beat Visual Sync Engine:
-    Every single spoken beat is locked to its exact millisecond duration and matched to a
-    bespoke visual (Live Candlestick Chart, Rolling KPI Counter, Wikimedia Entity Spotlight,
-    Newsroom Card, Debate Card, Countdown Quiz, or tight HD B-roll/Editorial Photo).
-    """
     os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
     mode = os.getenv("CONTENT_MODE", "news_bulletin").strip().lower()
@@ -725,18 +761,23 @@ def build_final_video(
     debate_card_png = os.path.join(work_dir, "debate_card.png")
     _create_debate_card_png(debate_card_png, width, height, debate_card)
 
-    prev_visual_type = None
+    video_cursor = 0.0
     total_beats = len(beat_audio_info)
-    print(f"[VideoBuilder] Assembling {total_beats} exact voice-synced beats ({width}x{height})...")
+    print(f"[VideoBuilder] Assembling {total_beats} frame-locked voice-synced beats ({width}x{height})...")
 
     for pos, bt in enumerate(beat_audio_info):
         v_path = bt["audio_path"]
-        dur = max(0.8, float(bt["duration"]))
-        start_t = float(bt.get("start_time", 0.0))
+        start_t = float(bt.get("start_time", video_cursor))
+        end_t = float(bt.get("end_time", start_t + float(bt["duration"])))
+        # Drift-compensated exact beat duration so visuals stay locked to voice over 10+ minutes
+        dur = max(0.6, round(end_t - video_cursor, 3))
+
         is_final_beat = bool(bt.get("is_final_beat", pos == total_beats - 1))
         itype = str(bt.get("interactive_type", "none")).strip().lower()
         vtype = str(bt.get("visual_type", "stock_video")).strip().lower()
         query = str(bt.get("visual_query", "technology")).strip() or "technology"
+        alt_query = str(bt.get("alt_query", "")).strip()
+        screen_tag = str(bt.get("screen_tag", "")).strip()
         narration = str(bt.get("narration", ""))
         m_val = str(bt.get("metric_value", "")).strip()
         m_lbl = str(bt.get("metric_label", "")).strip()
@@ -745,35 +786,33 @@ def build_final_video(
         voice_files.append(v_path)
         beat_mp4 = os.path.join(work_dir, f"beat_vis_{pos:03d}.mp4")
 
-        # Synced audio events locked to exact millisecond of this beat
         if itype == "music_drop":
-            music_drops.append((start_t, min(start_t + 1.8, start_t + dur)))
+            music_drops.append((start_t, min(start_t + 1.8, end_t)))
             sfx_events["impact"].append(int(start_t * 1000))
         if bt.get("countdown_start") is not None:
             sfx_events["tick"].append(int(float(bt["countdown_start"]) * 1000))
         if pos > 0 and (bt.get("is_scene_start") or is_final_beat):
             sfx_events["whoosh"].append(int(start_t * 1000))
 
-        # Anti-monotony guard: alternate stock_video & editorial_photo so no two plain stock clips repeat
-        if vtype == "stock_video" and prev_visual_type == "stock_video":
-            vtype = "editorial_photo"
-        elif vtype == "editorial_photo" and prev_visual_type == "editorial_photo":
-            vtype = "stock_video"
+        # Optional sleek top-left editorial badge on key B-roll shots
+        tag_png = None
+        if screen_tag and not is_final_beat and itype == "none" and vtype in ("stock_video", "editorial_photo"):
+            tag_p = os.path.join(work_dir, f"etag_{pos:03d}.png")
+            tag_png = _create_editorial_tag_png(tag_p, width, height, screen_tag)
 
         rendered_ok = False
-
         try:
-            # ROUTE 1: Final Branded Outro Beat
+            # ROUTE 1: Full-Screen Centered Cinematic Outro with Smooth Fade-In
             if is_final_beat:
-                bg_img = fetch_stock_image("dark minimalist studio", os.path.join(work_dir, f"outro_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
-                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, is_shorts, overlay_png=outro_card_png)
+                bg_img = fetch_stock_image("dark modern studio", os.path.join(work_dir, f"outro_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
+                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=outro_card_png, fade_overlay=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 2: Interactive Debate Card (1 vs 2)
+            # ROUTE 2: Interactive 1 vs 2 Debate Card
             elif itype == "debate":
-                bg_img = fetch_stock_image(query, os.path.join(work_dir, f"deb_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
-                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, is_shorts, overlay_png=debate_card_png)
+                bg_img = fetch_stock_image(query, os.path.join(work_dir, f"deb_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
+                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=debate_card_png, fade_overlay=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
@@ -781,12 +820,12 @@ def build_final_video(
             elif itype == "countdown":
                 cd_png = os.path.join(work_dir, f"cd_{pos:03d}.png")
                 _create_countdown_card_png(cd_png, width, height, highlight_text)
-                bg_img = fetch_stock_image(query, os.path.join(work_dir, f"cd_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
-                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, is_shorts, overlay_png=cd_png)
+                bg_img = fetch_stock_image(query, os.path.join(work_dir, f"cd_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
+                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=cd_png, fade_overlay=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 4: Live Animated Candlestick Chart (Exact spoken drop/rally!)
+            # ROUTE 4: Live Animated Candlestick Chart (Only for real market/stock moves)
             elif vtype in ("chart_down", "chart_up"):
                 is_bear = (vtype == "chart_down")
                 sym = _detect_ticker_symbol(narration, query)
@@ -801,11 +840,11 @@ def build_final_video(
                     change_label=m_val,
                     subtitle=m_lbl,
                 )
-                _render_media_beat(raw_chart, False, dur, beat_mp4, width, height, is_shorts, is_motion_graphic=True)
+                _render_media_beat(raw_chart, False, dur, beat_mp4, width, height, is_motion_graphic=True)
                 sfx_events["impact"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 5: Animated Rolling KPI Stat Counter ($40B, -100 PTS, 300%)
+            # ROUTE 5: Animated Rolling KPI Stat Counter
             elif vtype == "kpi_slam":
                 is_neg = m_val.startswith("-") or any(w in narration.lower() for w in ("lost", "drop", "crash", "fell", "loss"))
                 acc = "red" if is_neg else ("green" if "$" in m_val else "gold")
@@ -819,11 +858,11 @@ def build_final_video(
                     label_text=m_lbl or highlight_text[:30],
                     accent=acc,
                 )
-                _render_media_beat(raw_kpi, False, dur, beat_mp4, width, height, is_shorts, is_motion_graphic=True)
+                _render_media_beat(raw_kpi, False, dur, beat_mp4, width, height, is_motion_graphic=True)
                 sfx_events["impact"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 6: Real Entity Spotlight (Wikimedia / News Photo of Person, Company, GPU, Game)
+            # ROUTE 6: Real Entity Spotlight (Wikimedia / News Photo of Person, Company, Product, Game)
             elif vtype == "entity_photo":
                 ent_key = query.lower()
                 ent_img = entity_cache.get(ent_key)
@@ -833,7 +872,7 @@ def build_final_video(
                     if not ent_img:
                         ent_img = fetch_article_image(query, ent_dl)
                     if not ent_img:
-                        ent_img = fetch_stock_image(query, ent_dl, orientation=orient, used_urls=used_urls)
+                        ent_img = fetch_stock_image(query, ent_dl, orientation=orient, used_urls=used_urls, alt_query=alt_query)
                     entity_cache[ent_key] = ent_img
 
                 raw_ent = os.path.join(work_dir, f"raw_ent_{pos:03d}.mp4")
@@ -845,16 +884,16 @@ def build_final_video(
                     entity_img_path=ent_img,
                     entity_title=query,
                     sub_label=m_lbl or highlight_text[:32],
-                    accent="cyan" if any(k in query.lower() for k in ("nvidia", "ai", "openai", "amd", "intel")) else "gold",
+                    accent="cyan" if any(k in query.lower() for k in ("nvidia", "ai", "openai", "amd", "intel", "tsmc")) else "gold",
                 )
-                _render_media_beat(raw_ent, False, dur, beat_mp4, width, height, is_shorts, is_motion_graphic=True)
+                _render_media_beat(raw_ent, False, dur, beat_mp4, width, height, is_motion_graphic=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
             # ROUTE 7: Newsroom Highlight Card (Beat 0 Hook or explicit news_card)
             elif vtype == "news_card" or pos == 0:
                 card_png = os.path.join(work_dir, f"ncard_{pos:03d}.png")
-                bg_img = fetch_stock_image(query, os.path.join(work_dir, f"nbg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
+                bg_img = fetch_stock_image(query, os.path.join(work_dir, f"nbg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
                 badge = "BREAKING HOOK" if pos == 0 else "NEWSROOM BRIEF"
                 _create_newsroom_highlight_card(
                     card_png,
@@ -865,41 +904,38 @@ def build_final_video(
                     thumb_img_path=article_thumb or bg_img,
                     accent="gold",
                 )
-                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, is_shorts, overlay_png=card_png)
+                _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=card_png, fade_overlay=(pos > 0))
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 8: Moving Stock Video B-Roll
+            # ROUTE 8: Relevance-Scored Exact Topic Video Footage (e.g., chip fab, shipyard, gaming)
             elif vtype == "stock_video":
                 broll_dl = os.path.join(work_dir, f"broll_{pos:03d}.mp4")
-                clip = fetch_broll_clip(query, broll_dl, used_urls=used_urls, is_shorts=is_shorts)
-                gif_pick = None
-                if pos > 1 and (pos % 7 == 3):
-                    gif_pick = fetch_giphy_sticker(query, os.path.join(work_dir, f"gif_{pos:03d}.gif"))
+                clip = fetch_broll_clip(query, broll_dl, used_urls=used_urls, is_shorts=is_shorts, alt_query=alt_query)
                 if clip:
-                    _render_media_beat(clip, False, dur, beat_mp4, width, height, is_shorts, gif_path=gif_pick)
+                    _render_media_beat(clip, False, dur, beat_mp4, width, height, overlay_png=tag_png)
                 else:
-                    fb_img = fetch_stock_image(query, os.path.join(work_dir, f"fb_img_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
-                    _render_media_beat(fb_img, True, dur, beat_mp4, width, height, is_shorts, gif_path=gif_pick)
+                    fb_img = fetch_stock_image(query, os.path.join(work_dir, f"fb_img_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
+                    _render_media_beat(fb_img, True, dur, beat_mp4, width, height, overlay_png=tag_png)
                 rendered_ok = True
 
-            # ROUTE 9: Editorial HD Photo with Smooth Ken Burns Zoom
+            # ROUTE 9: Editorial HD Photo with Smooth Ken Burns Motion
             else:
-                ed_img = fetch_stock_image(query, os.path.join(work_dir, f"ed_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
-                _render_media_beat(ed_img, True, dur, beat_mp4, width, height, is_shorts)
+                ed_img = fetch_stock_image(query, os.path.join(work_dir, f"ed_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
+                _render_media_beat(ed_img, True, dur, beat_mp4, width, height, overlay_png=tag_png)
                 rendered_ok = True
 
         except Exception as beat_err:
-            print(f"[VideoBuilder] Beat {pos + 1} ({vtype}) warning: {beat_err} -> using safe editorial fallback")
+            print(f"[VideoBuilder] Beat {pos + 1} ({vtype}) warning: {beat_err} -> safe fallback")
             rendered_ok = False
 
-        # Zero-crash safety fallback for any corrupted download or unexpected render hiccup
         if not rendered_ok or not os.path.exists(beat_mp4) or os.path.getsize(beat_mp4) < 1024:
-            safe_img = fetch_stock_image("dark technology", os.path.join(work_dir, f"safe_{pos:03d}.jpg"), orientation=orient)
-            _render_media_beat(safe_img, True, dur, beat_mp4, width, height, is_shorts)
+            safe_img = fetch_stock_image("dark modern studio", os.path.join(work_dir, f"safe_{pos:03d}.jpg"), orientation=orient)
+            _render_media_beat(safe_img, True, dur, beat_mp4, width, height)
 
+        actual_d = _probe_duration(beat_mp4)
+        video_cursor += actual_d if actual_d > 0.2 else dur
         subclips.append(beat_mp4)
-        prev_visual_type = vtype
 
     concat_list_txt = os.path.join(work_dir, "visual_concat.txt")
     with open(concat_list_txt, "w", encoding="utf-8") as f:
@@ -924,7 +960,7 @@ def build_final_video(
     voice_merged = os.path.join(work_dir, "voice_merged.mp3")
     _run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", voice_list_txt, "-c:a", "libmp3lame", "-q:a", "3", voice_merged])
 
-    total_dur = sum(float(x["duration"]) for x in beat_audio_info)
+    total_dur = _probe_duration(voice_merged) or sum(float(x["duration"]) for x in beat_audio_info)
     master_wav = os.path.join(work_dir, "audio_master.wav")
     _master_voice_and_music(
         voice_merged,
