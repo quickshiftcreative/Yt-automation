@@ -111,7 +111,8 @@ def upload_video_with_thumbnail(
             "description": safe_desc,
             "tags": clean_tags,
             "categoryId": cat_id,
-            "defaultLanguage": "en",
+            "defaultLanguage": "en-US",
+            "defaultAudioLanguage": "en-US",
         },
         "status": status_body,
     }
@@ -124,11 +125,15 @@ def upload_video_with_thumbnail(
             print("[YouTube] Tag keyword warning — retrying immediately with safe tags...")
             body["snippet"]["tags"] = ["tech news", "ai news", "gaming", "stock market"]
             response = _execute_resumable_upload(youtube, video_path, body)
+        elif "defaultLanguage" in err_txt or "defaultAudioLanguage" in err_txt:
+            body["snippet"]["defaultLanguage"] = "en"
+            body["snippet"]["defaultAudioLanguage"] = "en"
+            response = _execute_resumable_upload(youtube, video_path, body)
         else:
             raise
 
     video_id = response["id"]
-    print(f"[YouTube] Uploaded Video ID: {video_id} (Tags: {len(body['snippet']['tags'])})")
+    print(f"[YouTube] Uploaded Video ID: {video_id} (Lang: en-US | Tags: {len(body['snippet']['tags'])})")
 
     if thumbnail_path and os.path.exists(thumbnail_path):
         try:
@@ -163,8 +168,8 @@ def post_engagement_comment(youtube, video_id, comment_text):
 
 def sync_channel_branding(youtube, winning_keywords=None, trailer_video_id=None):
     """
-    Automatically optimizes the YouTube channel's SEO Description, Channel Keywords, Country (US),
-    Default Language (en), and Unsubscribed Channel Trailer via YouTube Data API v3 channels.update.
+    Sets Channel Country to India ('IN') for safe AdSense/monetization verification,
+    while targeting US English ('en-US') for US audience reach + SEO Description & Keywords.
     """
     if not youtube:
         return False
@@ -176,8 +181,10 @@ def sync_channel_branding(youtube, winning_keywords=None, trailer_video_id=None)
 
         ch = items[0]
         ch_id = ch["id"]
-        current_title = (ch.get("brandingSettings", {}).get("channel", {}).get("title")
-                         or ch.get("snippet", {}).get("title", "Quick Shift Creative"))
+        current_title = (
+            ch.get("brandingSettings", {}).get("channel", {}).get("title")
+            or ch.get("snippet", {}).get("title", "Quick Shift Creative")
+        )
 
         base_kws = [
             "Quick Shift Creative", "US Tech News", "AI News", "Gaming News",
@@ -186,7 +193,6 @@ def sync_channel_branding(youtube, winning_keywords=None, trailer_video_id=None)
         ]
         extra = [str(k).strip() for k in (winning_keywords or []) if len(str(k).strip()) >= 3][:8]
         all_kws = list(dict.fromkeys(base_kws + extra))
-        # YouTube channel keywords format: space-separated, multi-word phrases wrapped in double quotes
         kw_string = " ".join(f'"{k}"' if " " in k else k for k in all_kws)[:480]
 
         seo_description = (
@@ -200,25 +206,34 @@ def sync_channel_branding(youtube, winning_keywords=None, trailer_video_id=None)
             "Subscribe and turn on notifications so you never miss the next big shift!"
         )
 
-        channel_branding = {
-            "title": current_title,
-            "description": seo_description,
-            "keywords": kw_string,
-            "country": "US",
-            "defaultLanguage": "en",
-        }
-        if trailer_video_id:
-            channel_branding["unsubscribedTrailer"] = trailer_video_id
+        for lang_code in ("en-US", "en"):
+            channel_branding = {
+                "title": current_title,
+                "description": seo_description,
+                "keywords": kw_string,
+                "country": "IN",
+                "defaultLanguage": lang_code,
+            }
+            if trailer_video_id:
+                channel_branding["unsubscribedTrailer"] = trailer_video_id
 
-        youtube.channels().update(
-            part="brandingSettings",
-            body={
-                "id": ch_id,
-                "brandingSettings": {"channel": channel_branding},
-            },
-        ).execute()
-        print(f"[ChannelSEO] Updated Channel Description, US Keywords & Branding for '{current_title}'!")
-        return True
+            try:
+                youtube.channels().update(
+                    part="brandingSettings",
+                    body={
+                        "id": ch_id,
+                        "brandingSettings": {"channel": channel_branding},
+                    },
+                ).execute()
+                print(
+                    f"[ChannelSEO] Updated Branding for '{current_title}' | "
+                    f"Country: IN (Monetization Safe) | Language: {lang_code}"
+                )
+                return True
+            except HttpError as he:
+                if lang_code == "en-US" and ("defaultLanguage" in str(he) or "invalidBrandingOption" in str(he)):
+                    continue
+                raise
     except Exception as e:
         print(f"[ChannelSEO] Channel branding update skipped (needs full youtube scope): {e}")
         return False
