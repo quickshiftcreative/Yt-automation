@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import re
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 CATEGORY_MAP = {
@@ -25,6 +27,47 @@ def get_youtube_service():
         creds.refresh(Request())
 
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def _sanitize_youtube_tags(tags, max_total_chars=430, max_tags=18):
+    """Enforces YouTube Data API v3 strict tag rules (<500 total chars, no angle brackets/symbols)."""
+    cleaned = []
+    seen = set()
+    total_len = 0
+
+    for raw in (tags or []):
+        s = str(raw or "")
+        # Strip invalid symbols, hashtags, quotes, angle brackets & non-ASCII emojis
+        s = re.sub(r"[<>#\"'\r\n\t|]+", " ", s)
+        s = re.sub(r"[^\x20-\x7E]", "", s)
+        s = re.sub(r"\s+", " ", s).strip(" ,.-")
+        if len(s) < 2 or len(s) > 45:
+            continue
+        low = s.lower()
+        if low in seen:
+            continue
+
+        # YouTube counts quotes around multi-word tags + comma separator toward the 500-char cap
+        item_cost = (len(s) + 2 if " " in s else len(s)) + (1 if cleaned else 0)
+        if total_len + item_cost > max_total_chars:
+            continue
+
+        seen.add(low)
+        cleaned.append(s)
+        total_len += item_cost
+        if len(cleaned) >= max_tags:
+            break
+
+    return cleaned or ["tech news", "ai news", "gaming", "markets"]
+
+
+def _execute_resumable_upload(youtube, video_path, body):
+    media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
+    req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+    response = None
+    while response is None:
+        _, response = req.next_chunk()
+    return response
 
 
 def upload_video_with_thumbnail(
@@ -59,13 +102,16 @@ def upload_video_with_thumbnail(
             status_body["publishAt"] = fallback_iso
             print(f"[YouTube] Fallback Schedule -> {fallback_iso} (+{lead_mins} min)")
 
-    clean_tags = [str(t).strip() for t in (tags or []) if str(t).strip()][:25]
+    clean_tags = _sanitize_youtube_tags(tags)
     cat_id = CATEGORY_MAP.get(str(category).lower(), "28")
+
+    safe_title = re.sub(r"[<>]+", "", str(title or "Daily Tech Shift")).strip()[:99]
+    safe_desc = re.sub(r"[<>]+", "", str(description or "")).strip()[:4900]
 
     body = {
         "snippet": {
-            "title": title[:99],
-            "description": description[:4900],
+            "title": safe_title,
+            "description": safe_desc,
             "tags": clean_tags,
             "categoryId": cat_id,
             "defaultLanguage": "en",
@@ -73,15 +119,19 @@ def upload_video_with_thumbnail(
         "status": status_body,
     }
 
-    media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
-    req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-
-    response = None
-    while response is None:
-        _, response = req.next_chunk()
+    try:
+        response = _execute_resumable_upload(youtube, video_path, body)
+    except HttpError as e:
+        err_txt = str(e)
+        if "invalidTags" in err_txt or "invalid video keywords" in err_txt:
+            print("[YouTube] Tag limit/keyword warning — retrying immediately with minimal safe tags...")
+            body["snippet"]["tags"] = ["tech news", "ai news", "gaming", "stock market"]
+            response = _execute_resumable_upload(youtube, video_path, body)
+        else:
+            raise
 
     video_id = response["id"]
-    print(f"[YouTube] Uploaded Video ID: {video_id}")
+    print(f"[YouTube] Uploaded Video ID: {video_id} (Tags: {len(body['snippet']['tags'])})")
 
     if thumbnail_path and os.path.exists(thumbnail_path):
         try:
