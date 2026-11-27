@@ -1,6 +1,6 @@
 {
-  "shorts_score": 166.53,
-  "long_score": 4.11,
+  "shorts_score": 180.87,
+  "long_score": 5.56,
   "winning_topics": [
     "California Sues OpenAI Over Safety",
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
@@ -27,7 +27,7 @@
     "techtrends",
     "gta6",
     "gamingnews",
-    "grandtheftauto"
+    "ai safety"
   ],
   "recent_viewer_comments": [],
   "healed_video_ids": [],
@@ -52,79 +52,79 @@
       "12": {
         "count": 2,
         "avg_views": 8.0,
-        "avg_reach": 40.62
+        "avg_reach": 34.11
       },
       "8": {
         "count": 2,
-        "avg_views": 51.0,
-        "avg_reach": 109.79
+        "avg_views": 53.5,
+        "avg_reach": 110.89
       },
       "23": {
         "count": 1,
-        "avg_views": 73.0,
-        "avg_reach": 366.83
+        "avg_views": 116.0,
+        "avg_reach": 548.59
       },
       "19": {
         "count": 3,
-        "avg_views": 603.7,
-        "avg_reach": 1148.8
+        "avg_views": 658.0,
+        "avg_reach": 1260.0
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 8.63
+        "avg_reach": 8.25
       },
       "9": {
         "count": 2,
-        "avg_views": 54.5,
-        "avg_reach": 103.86
+        "avg_views": 56.5,
+        "avg_reach": 104.84
       },
       "0": {
         "count": 1,
         "avg_views": 335.0,
-        "avg_reach": 601.29
+        "avg_reach": 588.32
       },
       "10": {
         "count": 1,
         "avg_views": 41.0,
-        "avg_reach": 71.41
+        "avg_reach": 70.29
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 13.2
+        "avg_reach": 13.09
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 6.58
+        "avg_reach": 6.52
       }
     },
     "long": {
       "4": {
         "count": 3,
-        "avg_views": 8.7,
-        "avg_reach": 46.73
+        "avg_views": 13.0,
+        "avg_reach": 53.38
       },
       "21": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 8.32
+        "avg_reach": 7.93
       },
       "22": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 6.39
+        "avg_reach": 6.24
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.4
+        "avg_reach": 1.38
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.43
+        "avg_reach": 4.39
       }
     }
   },
@@ -134,12 +134,17 @@
         "hour_et": 19,
         "format": "shorts",
         "publish_at_utc": "2026-11-27T00:15:00Z"
+      },
+      {
+        "hour_et": 20,
+        "format": "shorts",
+        "publish_at_utc": "2026-11-27T01:15:00Z"
       }
     ]
   },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 1,
+    "total_recorded": 2,
     "winning_font": "Anton",
     "winning_layout": "mrbeast_bottom_slam",
     "font_stats": {},
@@ -154,10 +159,20 @@
         "uploaded_utc": "2026-11-26T22:04:23Z",
         "views": 0,
         "ctr_proxy": null
+      },
+      "rb0izYGOOko": {
+        "font": "Poppins Black",
+        "layout": "youtube_clean_pro",
+        "accent": "gold",
+        "topic": "Grand Theft Boston AI Parody",
+        "is_shorts": true,
+        "uploaded_utc": "2026-11-27T00:06:07Z",
+        "views": 0,
+        "ctr_proxy": null
       }
     }
   },
-  "last_updated_utc": "2026-11-26T21:54:24Z",
+  "last_updated_utc": "2026-11-26T23:59:21Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
