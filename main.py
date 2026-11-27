@@ -9,14 +9,21 @@ from voice_engine import generate_scene_voices_and_srt
 from media_fetcher import fetch_article_image, fetch_stock_image
 from thumbnail_maker import create_thumbnail
 from video_builder import build_final_video
-from youtube_uploader import get_youtube_service, post_engagement_comment, upload_video_with_thumbnail
+from youtube_uploader import (
+    get_youtube_service,
+    post_engagement_comment,
+    sync_channel_branding,
+    upload_video_with_thumbnail,
+)
 from learning_engine import (
     load_strategy_memory,
+    mark_channel_branding_synced,
     pick_smart_publish_time,
     pick_thumbnail_experiment_config,
     record_scheduled_slot,
     record_thumbnail_experiment,
     run_48h_seo_self_healing,
+    should_sync_channel_branding,
     update_strategy_from_youtube,
 )
 
@@ -33,27 +40,26 @@ def _resolve_video_format():
     return "shorts" if raw_fmt == "shorts" else "horizontal"
 
 
-def _build_chapters_text(scene_audio_info):
-    if len(scene_audio_info) < 10:
+def _build_chapters_text(beat_audio_info):
+    if len(beat_audio_info) < 12:
         return ""
-    step = max(4, len(scene_audio_info) // 6)
-    picks = [0] + list(range(step, len(scene_audio_info) - 1, step)) + [len(scene_audio_info) - 1]
+    step = max(5, len(beat_audio_info) // 6)
+    picks = [0] + list(range(step, len(beat_audio_info) - 1, step)) + [len(beat_audio_info) - 1]
     seen = set()
     lines = ["\nChapters:"]
     for idx in picks:
         if idx in seen:
             continue
         seen.add(idx)
-        sc = scene_audio_info[idx]
-        t_sec = int(float(sc.get("start_time", 0)))
+        bt = beat_audio_info[idx]
+        t_sec = int(float(bt.get("start_time", 0)))
         mm, ss = divmod(t_sec, 60)
-        lbl = "Intro & Hook" if idx == 0 else ("Final Takeaway" if idx == len(scene_audio_info) - 1 else (sc.get("highlight_text") or "Key Update"))
+        lbl = "Intro & Hook" if idx == 0 else ("Final Takeaway" if idx == len(beat_audio_info) - 1 else (bt.get("highlight_text") or bt.get("screen_tag") or "Key Update"))
         lines.append(f"{mm:02d}:{ss:02d} {lbl[:48]}")
     return "\n".join(lines) + "\n"
 
 
 def _fetch_real_topic_thumbnail_bg(chosen_topic, fallback_query, work_dir):
-    """Prioritizes a sharp real press/topic image from the video's actual story before stock fallback."""
     real_path = os.path.join(work_dir, "thumb_real_topic.jpg")
     if chosen_topic:
         art_img = fetch_article_image(chosen_topic, real_path)
@@ -67,7 +73,7 @@ def _fetch_real_topic_thumbnail_bg(chosen_topic, fallback_query, work_dir):
                 pass
 
     stock_path = os.path.join(work_dir, "thumb_bg.jpg")
-    print(f"[Thumbnail] Falling back to HD topic editorial photo for '{fallback_query}'")
+    print(f"[Thumbnail] Using HD topic editorial photo for '{fallback_query}'")
     return fetch_stock_image(fallback_query or "technology", stock_path, orientation="landscape")
 
 
@@ -79,8 +85,17 @@ def run_pipeline():
     youtube = get_youtube_service()
     print("[Pipeline] YouTube OAuth verified!")
 
-    update_strategy_from_youtube(youtube_service=youtube)
+    mem = update_strategy_from_youtube(youtube_service=youtube)
     run_48h_seo_self_healing(youtube_service=youtube, gemini_api_key=GEMINI_API_KEY)
+
+    # Auto-optimize Channel SEO Description, US Keywords & Channel Trailer once every 7 days
+    if should_sync_channel_branding():
+        if sync_channel_branding(
+            youtube,
+            winning_keywords=mem.get("winning_keywords", []),
+            trailer_video_id=mem.get("best_long_video_id", ""),
+        ):
+            mark_channel_branding_synced()
 
     active_format = _resolve_video_format()
     os.environ["VIDEO_FORMAT"] = active_format
@@ -96,14 +111,14 @@ def run_pipeline():
     blueprint = generate_video_blueprint(trending_topics, custom_topic=CUSTOM_TOPIC)
 
     captions_ass_path = os.path.join(WORK_DIR, "captions.ass")
-    scene_audio_info, total_duration = generate_scene_voices_and_srt(
+    beat_audio_info, total_duration = generate_scene_voices_and_srt(
         blueprint["scenes"], WORK_DIR, captions_ass_path
     )
     print(f"[Pipeline] Total voiceover duration: {total_duration:.2f}s")
 
     final_desc = str(blueprint.get("description", "")).strip()
     if active_format != "shorts":
-        chapters_txt = _build_chapters_text(scene_audio_info)
+        chapters_txt = _build_chapters_text(beat_audio_info)
         if chapters_txt and "00:00" not in final_desc:
             final_desc = f"{final_desc}\n{chapters_txt}"
     if "#" not in final_desc:
@@ -112,7 +127,6 @@ def run_pipeline():
 
     chosen_topic = blueprint.get("chosen_topic", CUSTOM_TOPIC or blueprint["title"])
 
-    # 50-Video Thumbnail Font + Layout Experiment Picker + Real Topic Image Polish
     thumb_cfg = pick_thumbnail_experiment_config(
         topic_text=f"{chosen_topic} {blueprint.get('title', '')}",
         category=blueprint.get("category", "tech"),
@@ -125,18 +139,20 @@ def run_pipeline():
     thumbnail_path = os.path.join(OUTPUT_DIR, "thumbnail.jpg")
     create_thumbnail(
         bg_image_path=fetched_bg,
-        headline=blueprint.get("thumbnail_headline", "BREAKING SHIFT"),
+        headline=blueprint.get("thumbnail_headline", "BIG SHIFT"),
         subtext=blueprint.get("thumbnail_subtext", ""),
         output_path=thumbnail_path,
-        bulletin_badge=blueprint.get("bulletin_badge", "TECH BULLETIN"),
+        bulletin_badge=blueprint.get("bulletin_badge", "DAILY BRIEF"),
         font_name=thumb_cfg["font"],
         layout=thumb_cfg["layout"],
         accent=thumb_cfg["accent"],
+        topic_prompt=blueprint.get("thumbnail_scene_prompt", chosen_topic),
+        gemini_api_key=GEMINI_API_KEY,
     )
 
     final_video_path = os.path.join(OUTPUT_DIR, "final_video.mp4")
     build_final_video(
-        scene_audio_info,
+        beat_audio_info,
         captions_ass_path,
         WORK_DIR,
         final_video_path,
@@ -174,7 +190,6 @@ def run_pipeline():
         publish_at_iso=publish_at_iso,
     )
 
-    # Record this video's font/layout into the 50-video CTR experiment ledger (only for public/scheduled runs)
     if privacy == "public":
         record_thumbnail_experiment(
             video_id=video_id,
