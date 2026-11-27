@@ -30,14 +30,12 @@ def get_youtube_service():
 
 
 def _sanitize_youtube_tags(tags, max_total_chars=430, max_tags=18):
-    """Enforces YouTube Data API v3 strict tag rules (<500 total chars, no angle brackets/symbols)."""
     cleaned = []
     seen = set()
     total_len = 0
 
     for raw in (tags or []):
         s = str(raw or "")
-        # Strip invalid symbols, hashtags, quotes, angle brackets & non-ASCII emojis
         s = re.sub(r"[<>#\"'\r\n\t|]+", " ", s)
         s = re.sub(r"[^\x20-\x7E]", "", s)
         s = re.sub(r"\s+", " ", s).strip(" ,.-")
@@ -47,7 +45,6 @@ def _sanitize_youtube_tags(tags, max_total_chars=430, max_tags=18):
         if low in seen:
             continue
 
-        # YouTube counts quotes around multi-word tags + comma separator toward the 500-char cap
         item_cost = (len(s) + 2 if " " in s else len(s)) + (1 if cleaned else 0)
         if total_len + item_cost > max_total_chars:
             continue
@@ -124,7 +121,7 @@ def upload_video_with_thumbnail(
     except HttpError as e:
         err_txt = str(e)
         if "invalidTags" in err_txt or "invalid video keywords" in err_txt:
-            print("[YouTube] Tag limit/keyword warning — retrying immediately with minimal safe tags...")
+            print("[YouTube] Tag keyword warning — retrying immediately with safe tags...")
             body["snippet"]["tags"] = ["tech news", "ai news", "gaming", "stock market"]
             response = _execute_resumable_upload(youtube, video_path, body)
         else:
@@ -145,7 +142,6 @@ def upload_video_with_thumbnail(
 
 
 def post_engagement_comment(youtube, video_id, comment_text):
-    """Posts an automatic debate/poll comment right after upload to spark viewer replies."""
     if not youtube or not video_id or not comment_text:
         return
     try:
@@ -155,13 +151,74 @@ def post_engagement_comment(youtube, video_id, comment_text):
                 "snippet": {
                     "videoId": video_id,
                     "topLevelComment": {
-                        "snippet": {
-                            "textOriginal": str(comment_text).strip()[:400],
-                        }
+                        "snippet": {"textOriginal": str(comment_text).strip()[:400]}
                     },
                 }
             },
         ).execute()
         print(f"[CommentBot] Posted engagement comment on {video_id}!")
     except Exception as e:
-        print(f"[CommentBot] Skipped (requires youtube.force-ssl scope & non-private status): {e}")
+        print(f"[CommentBot] Skipped (requires youtube.force-ssl scope): {e}")
+
+
+def sync_channel_branding(youtube, winning_keywords=None, trailer_video_id=None):
+    """
+    Automatically optimizes the YouTube channel's SEO Description, Channel Keywords, Country (US),
+    Default Language (en), and Unsubscribed Channel Trailer via YouTube Data API v3 channels.update.
+    """
+    if not youtube:
+        return False
+    try:
+        ch_resp = youtube.channels().list(part="brandingSettings,snippet", mine=True).execute()
+        items = ch_resp.get("items", [])
+        if not items:
+            return False
+
+        ch = items[0]
+        ch_id = ch["id"]
+        current_title = (ch.get("brandingSettings", {}).get("channel", {}).get("title")
+                         or ch.get("snippet", {}).get("title", "Quick Shift Creative"))
+
+        base_kws = [
+            "Quick Shift Creative", "US Tech News", "AI News", "Gaming News",
+            "Stock Market News", "Nvidia", "Semiconductors", "Tech Explainers",
+            "Business Strategy", "Wall Street", "Viral Tech", "YouTube Shorts",
+        ]
+        extra = [str(k).strip() for k in (winning_keywords or []) if len(str(k).strip()) >= 3][:8]
+        all_kws = list(dict.fromkeys(base_kws + extra))
+        # YouTube channel keywords format: space-separated, multi-word phrases wrapped in double quotes
+        kw_string = " ".join(f'"{k}"' if " " in k else k for k in all_kws)[:480]
+
+        seo_description = (
+            "Welcome to Quick Shift Creative — your daily edge on Technology, AI, Gaming, and US Markets.\n\n"
+            "Every single day, we break down the biggest shifts shaping Silicon Valley, chip manufacturing, "
+            "Wall Street movers, and gaming culture — fast, visual, and straight to the point.\n\n"
+            "What you get here:\n"
+            "- Daily Tech, AI & Semiconductor Deep Dives\n"
+            "- Stock Market & Big-Tech Business Breakdowns\n"
+            "- High-Speed 60-Second Gaming & Viral Tech Shorts\n\n"
+            "Subscribe and turn on notifications so you never miss the next big shift!"
+        )
+
+        channel_branding = {
+            "title": current_title,
+            "description": seo_description,
+            "keywords": kw_string,
+            "country": "US",
+            "defaultLanguage": "en",
+        }
+        if trailer_video_id:
+            channel_branding["unsubscribedTrailer"] = trailer_video_id
+
+        youtube.channels().update(
+            part="brandingSettings",
+            body={
+                "id": ch_id,
+                "brandingSettings": {"channel": channel_branding},
+            },
+        ).execute()
+        print(f"[ChannelSEO] Updated Channel Description, US Keywords & Branding for '{current_title}'!")
+        return True
+    except Exception as e:
+        print(f"[ChannelSEO] Channel branding update skipped (needs full youtube scope): {e}")
+        return False
