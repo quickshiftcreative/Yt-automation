@@ -2,6 +2,7 @@ import glob
 import os
 import random
 import subprocess
+import requests
 from PIL import Image, ImageDraw, ImageFont
 from config import CHANNEL_NAME
 from chart_animator import (
@@ -17,6 +18,8 @@ from media_fetcher import (
     fetch_stock_image,
     fetch_wikimedia_entity_image,
 )
+
+LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
 
 
 def _repo_root():
@@ -144,6 +147,100 @@ def _draw_centered_text(draw, center_x, y, text, font, fill):
     draw.text((center_x - tw // 2, y), text, fill=fill, font=font)
 
 
+def _download_yt_thumb(video_id, out_path):
+    if not video_id:
+        return None
+    for variant in ("maxresdefault.jpg", "hqdefault.jpg"):
+        try:
+            r = requests.get(f"https://i.ytimg.com/vi/{video_id}/{variant}", timeout=10)
+            if r.status_code == 200 and len(r.content) > 5000:
+                with open(out_path, "wb") as f:
+                    f.write(r.content)
+                with Image.open(out_path) as im:
+                    if im.width >= 320:
+                        return out_path
+        except Exception:
+            continue
+    return None
+
+
+def _create_long_endscreen_canvas(out_png, width, height, endscreen_videos, work_dir):
+    """
+    Creates a 1920x1080 YouTube End Screen canvas specifically aligned to YouTube Studio's
+    standard 2-Video End Screen slots: Left = Top-Performing Video, Right = Low-Performing Boost Video.
+    """
+    canvas = Image.new("RGB", (width, height), (9, 12, 20))
+    draw = ImageDraw.Draw(canvas)
+
+    # Subtle dark editorial grid
+    for x in range(0, width, 96):
+        draw.line([(x, 0), (x, height)], fill=(18, 24, 36), width=1)
+    for y in range(0, height, 96):
+        draw.line([(0, y), (width, y)], fill=(18, 24, 36), width=1)
+
+    gold = (250, 204, 21)
+    green = (34, 211, 138)
+    yt_red = (235, 32, 48)
+    white = (248, 250, 252)
+    muted = (176, 188, 208)
+    cx = width // 2
+
+    # Header
+    _draw_centered_text(draw, cx, 56, "WATCH NEXT ON " + (CHANNEL_NAME or "QUICK SHIFT CREATIVE").upper(), _find_font(44), white)
+    _draw_centered_text(draw, cx, 118, "Two handpicked breakdowns ready for you — click a video or check the description", _find_font(24), muted)
+
+    ev = endscreen_videos or {}
+    slots = [
+        ("TOP PERFORMER", ev.get("top"), 110, gold),
+        ("DON'T MISS THIS", ev.get("boost"), 1040, green),
+    ]
+
+    box_w, box_h = 770, 434  # Exact 16:9 ratio matching YouTube End Screen elements
+    box_y = 215
+
+    for idx_s, (badge_lbl, v_info, bx, acc_col) in enumerate(slots):
+        # Glowing outer frame
+        draw.rounded_rectangle([bx - 6, box_y - 6, bx + box_w + 6, box_y + box_h + 6], radius=24, fill=(16, 22, 34), outline=acc_col, width=4)
+
+        thumb_ok = False
+        if v_info and v_info.get("id"):
+            t_path = os.path.join(work_dir, f"es_thumb_{idx_s}.jpg")
+            dl = _download_yt_thumb(v_info["id"], t_path)
+            if dl:
+                try:
+                    with Image.open(dl) as im:
+                        im = im.convert("RGB").resize((box_w, box_h), LANCZOS)
+                        mask = Image.new("L", (box_w, box_h), 0)
+                        ImageDraw.Draw(mask).rounded_rectangle([0, 0, box_w, box_h], radius=18, fill=255)
+                        canvas.paste(im, (bx, box_y), mask)
+                        thumb_ok = True
+                except Exception:
+                    pass
+
+        if not thumb_ok:
+            draw.rounded_rectangle([bx, box_y, bx + box_w, box_y + box_h], radius=18, fill=(18, 24, 38))
+            _draw_centered_text(draw, bx + box_w // 2, box_y + box_h // 2 - 20, "UP NEXT", _find_font(46), acc_col)
+
+        # Pill badge at top-left of card
+        draw.rounded_rectangle([bx + 18, box_y - 24, bx + 290, box_y + 20], radius=10, fill=acc_col)
+        _draw_centered_text(draw, bx + 154, box_y - 14, badge_lbl, _find_font(22), (10, 12, 16))
+
+        # Video title neatly below box
+        v_title = (v_info.get("title") if v_info else "More Tech, AI & Market Breakdowns") or "Watch Next"
+        v_title = v_title[:52] + ("..." if len(v_title) > 52 else "")
+        _draw_centered_text(draw, bx + box_w // 2, box_y + box_h + 26, v_title, _find_font(26), white)
+
+    # Bottom Subscribe & Thank You Strip
+    sub_y = 835
+    draw.rounded_rectangle([cx - 340, sub_y, cx + 340, sub_y + 84], radius=20, fill=(16, 20, 30), outline=gold, width=3)
+    draw.rounded_rectangle([cx + 70, sub_y + 14, cx + 316, sub_y + 70], radius=14, fill=yt_red)
+    draw.text((cx - 306, sub_y + 24), "THANK YOU FOR WATCHING", font=_find_font(26), fill=white)
+    _draw_centered_text(draw, cx + 193, sub_y + 26, "SUBSCRIBE", _find_font(26), white)
+
+    canvas.save(out_png, "PNG")
+    return out_png
+
+
 def _create_progress_bar_png(out_png, width, bar_h=10):
     img = Image.new("RGBA", (width, bar_h), (250, 204, 21, 245))
     img.save(out_png, "PNG")
@@ -166,7 +263,6 @@ def _create_brand_watermark_png(out_png, width, height):
 
 
 def _create_editorial_tag_png(out_png, width, height, tag_text):
-    """Sleek Premiere-Pro style top-left editorial context badge (zero clutter, human documentary feel)."""
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
     lbl = str(tag_text or "").strip().upper()[:24]
@@ -270,10 +366,6 @@ def _create_debate_card_png(out_png, width, height, debate_card):
 
 
 def _create_outro_card_png(out_png, width, height):
-    """
-    Properly centered, full-screen dark studio Outro overlay positioned cleanly in the
-    upper-middle safe zone (zero collision with captions or YouTube end-screen cards).
-    """
     canvas = Image.new("RGBA", (width, height), (6, 9, 16, 175))
     draw = ImageDraw.Draw(canvas)
     is_vertical = height > width
@@ -303,10 +395,8 @@ def _create_outro_card_png(out_png, width, height):
     _draw_centered_text(draw, cx, y0 + 46, "THANK YOU FOR WATCHING", f_title, white)
     _draw_centered_text(draw, cx, y0 + 126, (CHANNEL_NAME or "Quick Shift Creative").upper(), f_chan, gold)
 
-    # Subtle divider line
     draw.line([(x0 + 80, y0 + 178), (x1 - 80, y0 + 178)], fill=(55, 68, 92, 200), width=2)
 
-    # Three crisp CTA buttons: LIKE | SHARE | SUBSCRIBE (YouTube Red)
     pills = [
         ("LIKE", (26, 34, 50, 255), white, gold),
         ("SHARE", (26, 34, 50, 255), white, gold),
@@ -366,7 +456,7 @@ def _create_newsroom_highlight_card(out_png, width, height, badge_text, headline
                     new_h = int(im.width / tgt_ratio)
                     top = (im.height - new_h) // 2
                     im = im.crop((0, top, im.width, top + new_h))
-                im = im.resize((tw, th), Image.Resampling.LANCZOS)
+                im = im.resize((tw, th), LANCZOS)
                 mask = Image.new("L", (tw, th), 0)
                 ImageDraw.Draw(mask).rounded_rectangle([0, 0, tw, th], radius=16, fill=255)
                 canvas.paste(im, (x0 + 26, y0 + 30), mask)
@@ -450,6 +540,7 @@ def _render_media_beat(
     overlay_png=None,
     fade_overlay=False,
     is_motion_graphic=False,
+    static_canvas=False,
 ):
     os.makedirs(os.path.dirname(out_mp4), exist_ok=True)
     fps = 24
@@ -459,7 +550,15 @@ def _render_media_beat(
     filter_chain = []
 
     if src_media and os.path.exists(src_media):
-        if is_image:
+        if static_canvas:
+            inp_args.extend(["-loop", "1", "-t", f"{dur:.3f}", "-i", src_media])
+            vf_parts = [
+                f"scale={width}:{height}",
+                f"fps={fps}",
+                "setsar=1",
+                "fade=t=in:st=0:d=0.5",
+            ]
+        elif is_image:
             scale_w = int(width * 1.12)
             scale_h = int(height * 1.12)
             scale_w += scale_w % 2
@@ -576,15 +675,17 @@ def _master_voice_and_music(
     music_direction=None,
     sfx_events=None,
     music_drops=None,
+    extra_endscreen_sec=0.0,
 ):
     rng = random.Random(404)
 
+    pad_tail = f",apad=pad_dur={extra_endscreen_sec:.2f}" if extra_endscreen_sec > 0.0 else ""
     v_filt = (
         "highpass=f=80,lowpass=f=15000,"
         "equalizer=f=160:width_type=o:width=1.4:g=2.2,"
         "equalizer=f=3000:width_type=o:width=1.2:g=2.0,"
         "acompressor=threshold=-18dB:ratio=2.8:attack=12:release=140:makeup=1.8,"
-        "loudnorm=I=-15:TP=-1.5:LRA=9"
+        f"loudnorm=I=-15:TP=-1.5:LRA=9{pad_tail}"
     )
     v_master = os.path.join(work_dir, "voice_mastered.wav")
     _run_ffmpeg(["ffmpeg", "-y", "-i", voice_concat_mp3, "-af", v_filt, "-ar", "44100", "-ac", "2", v_master])
@@ -636,7 +737,7 @@ def _master_voice_and_music(
             m_norm,
         ])
         inputs.extend(["-i", m_norm])
-        fade_out_d = 2.2 if not is_shorts else 1.8
+        fade_out_d = 2.6 if not is_shorts else 1.8
         fade_out_st = max(0.5, total_dur - fade_out_d)
 
         drop_filters = ""
@@ -661,8 +762,8 @@ def _master_voice_and_music(
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_impact, events.get("impact", []), 1.15, 0.22, "im")
     cur_v, idx = _append_sfx_layer(inputs, parts, cur_v, idx, sfx_tick, events.get("tick", []), 1.7, 0.22, "tk")
 
-    final_afade_st = max(0.5, total_dur - 1.2)
-    parts.append(f"{cur_v}alimiter=limit=0.95,afade=t=out:st={final_afade_st:.2f}:d=1.2[am_final]")
+    final_afade_st = max(0.5, total_dur - 1.4)
+    parts.append(f"{cur_v}alimiter=limit=0.95,afade=t=out:st={final_afade_st:.2f}:d=1.4[am_final]")
 
     cmd = [
         "ffmpeg", "-y",
@@ -736,6 +837,7 @@ def build_final_video(
     music_direction=None,
     chosen_topic="",
     debate_card=None,
+    endscreen_videos=None,
 ):
     os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
     is_shorts = os.getenv("VIDEO_FORMAT", "horizontal").strip().lower() == "shorts"
@@ -769,7 +871,6 @@ def build_final_video(
         v_path = bt["audio_path"]
         start_t = float(bt.get("start_time", video_cursor))
         end_t = float(bt.get("end_time", start_t + float(bt["duration"])))
-        # Drift-compensated exact beat duration so visuals stay locked to voice over 10+ minutes
         dur = max(0.6, round(end_t - video_cursor, 3))
 
         is_final_beat = bool(bt.get("is_final_beat", pos == total_beats - 1))
@@ -794,7 +895,6 @@ def build_final_video(
         if pos > 0 and (bt.get("is_scene_start") or is_final_beat):
             sfx_events["whoosh"].append(int(start_t * 1000))
 
-        # Optional sleek top-left editorial badge on key B-roll shots
         tag_png = None
         if screen_tag and not is_final_beat and itype == "none" and vtype in ("stock_video", "editorial_photo"):
             tag_p = os.path.join(work_dir, f"etag_{pos:03d}.png")
@@ -802,21 +902,18 @@ def build_final_video(
 
         rendered_ok = False
         try:
-            # ROUTE 1: Full-Screen Centered Cinematic Outro with Smooth Fade-In
             if is_final_beat:
                 bg_img = fetch_stock_image("dark modern studio", os.path.join(work_dir, f"outro_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls)
                 _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=outro_card_png, fade_overlay=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 2: Interactive 1 vs 2 Debate Card
             elif itype == "debate":
                 bg_img = fetch_stock_image(query, os.path.join(work_dir, f"deb_bg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
                 _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=debate_card_png, fade_overlay=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 3: Interactive 2-Second Countdown Quiz Card
             elif itype == "countdown":
                 cd_png = os.path.join(work_dir, f"cd_{pos:03d}.png")
                 _create_countdown_card_png(cd_png, width, height, highlight_text)
@@ -825,44 +922,30 @@ def build_final_video(
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 4: Live Animated Candlestick Chart (Only for real market/stock moves)
             elif vtype in ("chart_down", "chart_up"):
                 is_bear = (vtype == "chart_down")
                 sym = _detect_ticker_symbol(narration, query)
                 raw_chart = os.path.join(work_dir, f"raw_chart_{pos:03d}.mp4")
                 render_animated_candlestick_clip(
-                    raw_chart,
-                    width=width,
-                    height=height,
-                    duration=dur,
-                    symbol=sym,
-                    bearish_bias=is_bear,
-                    change_label=m_val,
-                    subtitle=m_lbl,
+                    raw_chart, width=width, height=height, duration=dur,
+                    symbol=sym, bearish_bias=is_bear, change_label=m_val, subtitle=m_lbl,
                 )
                 _render_media_beat(raw_chart, False, dur, beat_mp4, width, height, is_motion_graphic=True)
                 sfx_events["impact"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 5: Animated Rolling KPI Stat Counter
             elif vtype == "kpi_slam":
                 is_neg = m_val.startswith("-") or any(w in narration.lower() for w in ("lost", "drop", "crash", "fell", "loss"))
                 acc = "red" if is_neg else ("green" if "$" in m_val else "gold")
                 raw_kpi = os.path.join(work_dir, f"raw_kpi_{pos:03d}.mp4")
                 render_kpi_counter_clip(
-                    raw_kpi,
-                    width=width,
-                    height=height,
-                    duration=dur,
-                    value_text=m_val or "100%",
-                    label_text=m_lbl or highlight_text[:30],
-                    accent=acc,
+                    raw_kpi, width=width, height=height, duration=dur,
+                    value_text=m_val or "100%", label_text=m_lbl or highlight_text[:30], accent=acc,
                 )
                 _render_media_beat(raw_kpi, False, dur, beat_mp4, width, height, is_motion_graphic=True)
                 sfx_events["impact"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 6: Real Entity Spotlight (Wikimedia / News Photo of Person, Company, Product, Game)
             elif vtype == "entity_photo":
                 ent_key = query.lower()
                 ent_img = entity_cache.get(ent_key)
@@ -877,38 +960,26 @@ def build_final_video(
 
                 raw_ent = os.path.join(work_dir, f"raw_ent_{pos:03d}.mp4")
                 render_entity_spotlight_clip(
-                    raw_ent,
-                    width=width,
-                    height=height,
-                    duration=dur,
-                    entity_img_path=ent_img,
-                    entity_title=query,
-                    sub_label=m_lbl or highlight_text[:32],
+                    raw_ent, width=width, height=height, duration=dur,
+                    entity_img_path=ent_img, entity_title=query, sub_label=m_lbl or highlight_text[:32],
                     accent="cyan" if any(k in query.lower() for k in ("nvidia", "ai", "openai", "amd", "intel", "tsmc")) else "gold",
                 )
                 _render_media_beat(raw_ent, False, dur, beat_mp4, width, height, is_motion_graphic=True)
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 7: Newsroom Highlight Card (Beat 0 Hook or explicit news_card)
             elif vtype == "news_card" or pos == 0:
                 card_png = os.path.join(work_dir, f"ncard_{pos:03d}.png")
                 bg_img = fetch_stock_image(query, os.path.join(work_dir, f"nbg_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
                 badge = "BREAKING HOOK" if pos == 0 else "NEWSROOM BRIEF"
                 _create_newsroom_highlight_card(
-                    card_png,
-                    width,
-                    height,
-                    badge,
-                    m_lbl or highlight_text,
-                    thumb_img_path=article_thumb or bg_img,
-                    accent="gold",
+                    card_png, width, height, badge, m_lbl or highlight_text,
+                    thumb_img_path=article_thumb or bg_img, accent="gold",
                 )
                 _render_media_beat(bg_img, True, dur, beat_mp4, width, height, overlay_png=card_png, fade_overlay=(pos > 0))
                 sfx_events["pop"].append(int(start_t * 1000))
                 rendered_ok = True
 
-            # ROUTE 8: Relevance-Scored Exact Topic Video Footage (e.g., chip fab, shipyard, gaming)
             elif vtype == "stock_video":
                 broll_dl = os.path.join(work_dir, f"broll_{pos:03d}.mp4")
                 clip = fetch_broll_clip(query, broll_dl, used_urls=used_urls, is_shorts=is_shorts, alt_query=alt_query)
@@ -919,7 +990,6 @@ def build_final_video(
                     _render_media_beat(fb_img, True, dur, beat_mp4, width, height, overlay_png=tag_png)
                 rendered_ok = True
 
-            # ROUTE 9: Editorial HD Photo with Smooth Ken Burns Motion
             else:
                 ed_img = fetch_stock_image(query, os.path.join(work_dir, f"ed_{pos:03d}.jpg"), orientation=orient, used_urls=used_urls, alt_query=alt_query)
                 _render_media_beat(ed_img, True, dur, beat_mp4, width, height, overlay_png=tag_png)
@@ -936,6 +1006,18 @@ def build_final_video(
         actual_d = _probe_duration(beat_mp4)
         video_cursor += actual_d if actual_d > 0.2 else dur
         subclips.append(beat_mp4)
+
+    # Append 10-second 2-Video End Screen Canvas on Long-form videos
+    extra_endscreen_sec = 0.0
+    if not is_shorts:
+        extra_endscreen_sec = 10.0
+        es_png = os.path.join(work_dir, "long_endscreen.png")
+        _create_long_endscreen_canvas(es_png, width, height, endscreen_videos, work_dir)
+        es_mp4 = os.path.join(work_dir, "long_endscreen_10s.mp4")
+        _render_media_beat(es_png, True, extra_endscreen_sec, es_mp4, width, height, static_canvas=True)
+        sfx_events["whoosh"].append(int(video_cursor * 1000))
+        subclips.append(es_mp4)
+        print("[EndScreen] Attached 10s Long-Form 2-Video End Screen Canvas (Top Performer + Boost Pick)")
 
     concat_list_txt = os.path.join(work_dir, "visual_concat.txt")
     with open(concat_list_txt, "w", encoding="utf-8") as f:
@@ -960,7 +1042,9 @@ def build_final_video(
     voice_merged = os.path.join(work_dir, "voice_merged.mp3")
     _run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", voice_list_txt, "-c:a", "libmp3lame", "-q:a", "3", voice_merged])
 
-    total_dur = _probe_duration(voice_merged) or sum(float(x["duration"]) for x in beat_audio_info)
+    voice_dur = _probe_duration(voice_merged) or sum(float(x["duration"]) for x in beat_audio_info)
+    total_dur = voice_dur + extra_endscreen_sec
+
     master_wav = os.path.join(work_dir, "audio_master.wav")
     _master_voice_and_music(
         voice_merged,
@@ -972,6 +1056,7 @@ def build_final_video(
         music_direction=music_direction,
         sfx_events=sfx_events,
         music_drops=music_drops,
+        extra_endscreen_sec=extra_endscreen_sec,
     )
 
     combined_mp4 = os.path.join(work_dir, "video_with_audio.mp4")
