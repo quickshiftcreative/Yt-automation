@@ -24,11 +24,12 @@ THUMBNAIL_FONTS = [
     "Bangers",
 ]
 
+# 4 Zero-Bottom-Text MrBeast / Human Creator Layouts
 THUMBNAIL_LAYOUTS = [
-    "mrbeast_bottom_slam",
-    "split_left_editorial",
-    "top_focus_frame",
-    "youtube_clean_pro",
+    "mrbeast_top_boom",
+    "split_vs_drama",
+    "upper_left_hero",
+    "minimal_big_stat",
 ]
 
 THUMB_EXPERIMENT_TARGET = 50
@@ -59,6 +60,8 @@ DEFAULT_MEMORY = {
     "winning_keywords": ["ai news", "nvidia", "tech news", "gaming", "stock market"],
     "recent_viewer_comments": [],
     "healed_video_ids": [],
+    "best_long_video_id": "",
+    "last_branding_sync_utc": "",
     "golden_hour_shorts_et": 20,
     "golden_hour_long_et": 20,
     "top_hours_shorts_et": [20, 17, 12, 8],
@@ -69,7 +72,7 @@ DEFAULT_MEMORY = {
         "target_videos": THUMB_EXPERIMENT_TARGET,
         "total_recorded": 0,
         "winning_font": "Anton",
-        "winning_layout": "mrbeast_bottom_slam",
+        "winning_layout": "mrbeast_top_boom",
         "font_stats": {},
         "layout_stats": {},
         "records": {},
@@ -90,6 +93,8 @@ def load_strategy_memory():
             else:
                 te = dict(DEFAULT_MEMORY["thumbnail_experiments"])
                 te.update(merged["thumbnail_experiments"])
+                if te.get("winning_layout") not in THUMBNAIL_LAYOUTS:
+                    te["winning_layout"] = "mrbeast_top_boom"
                 merged["thumbnail_experiments"] = te
             return merged
         except Exception:
@@ -144,10 +149,7 @@ def _parse_iso_duration_seconds(dur_str):
     m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", dur_str)
     if not m:
         return 0
-    hrs = int(m.group(1) or 0)
-    mins = int(m.group(2) or 0)
-    secs = int(m.group(3) or 0)
-    return hrs * 3600 + mins * 60 + secs
+    return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
 
 
 def _parse_utc_dt(iso_str):
@@ -206,11 +208,7 @@ def _fetch_recent_viewer_comments(youtube_service, video_ids):
     for vid in video_ids[:5]:
         try:
             c_resp = youtube_service.commentThreads().list(
-                part="snippet",
-                videoId=vid,
-                order="relevance",
-                maxResults=3,
-                textFormat="plainText",
+                part="snippet", videoId=vid, order="relevance", maxResults=3, textFormat="plainText"
             ).execute()
             for item in c_resp.get("items", []):
                 top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
@@ -226,7 +224,6 @@ def _fetch_recent_viewer_comments(youtube_service, video_ids):
 
 
 def _update_thumbnail_experiment_scores(mem, live_video_metrics):
-    """Evaluates all recorded thumbnail experiments against live YouTube views & CTR-proxy velocity."""
     te = mem.get("thumbnail_experiments") or dict(DEFAULT_MEMORY["thumbnail_experiments"])
     records = te.get("records") or {}
     if not records:
@@ -242,18 +239,16 @@ def _update_thumbnail_experiment_scores(mem, live_video_metrics):
         views = m["views"]
         velocity = m["velocity"]
         base_avg = shorts_base if rec.get("is_shorts") else long_base
-        # Normalized CTR-proxy score: > 1.0 means thumbnail beat channel average click-traction
         ctr_proxy = round((views / base_avg) * 0.55 + (velocity / max(1.0, base_avg * 0.12)) * 0.45, 3)
         rec["views"] = views
         rec["ctr_proxy"] = ctr_proxy
 
-    font_agg = {}
-    layout_agg = {}
+    font_agg, layout_agg = {}, {}
     for rec in records.values():
         if rec.get("ctr_proxy") is None:
             continue
         fn = rec.get("font", "Anton")
-        ly = rec.get("layout", "mrbeast_bottom_slam")
+        ly = rec.get("layout", "mrbeast_top_boom")
         score = float(rec["ctr_proxy"])
         views = int(rec.get("views", 0))
 
@@ -262,59 +257,41 @@ def _update_thumbnail_experiment_scores(mem, live_video_metrics):
         fa["score_sum"] += score
         fa["views_sum"] += views
 
-        la = layout_agg.setdefault(ly, {"count": 0, "score_sum": 0.0, "views_sum": 0})
-        la["count"] += 1
-        la["score_sum"] += score
-        la["views_sum"] += views
+        if ly in THUMBNAIL_LAYOUTS:
+            la = layout_agg.setdefault(ly, {"count": 0, "score_sum": 0.0, "views_sum": 0})
+            la["count"] += 1
+            la["score_sum"] += score
+            la["views_sum"] += views
 
     te["font_stats"] = {
-        k: {
-            "count": v["count"],
-            "avg_ctr_proxy": round(v["score_sum"] / max(1, v["count"]), 3),
-            "avg_views": round(v["views_sum"] / max(1, v["count"]), 1),
-        }
+        k: {"count": v["count"], "avg_ctr_proxy": round(v["score_sum"] / max(1, v["count"]), 3), "avg_views": round(v["views_sum"] / max(1, v["count"]), 1)}
         for k, v in font_agg.items()
     }
     te["layout_stats"] = {
-        k: {
-            "count": v["count"],
-            "avg_ctr_proxy": round(v["score_sum"] / max(1, v["count"]), 3),
-            "avg_views": round(v["views_sum"] / max(1, v["count"]), 1),
-        }
+        k: {"count": v["count"], "avg_ctr_proxy": round(v["score_sum"] / max(1, v["count"]), 3), "avg_views": round(v["views_sum"] / max(1, v["count"]), 1)}
         for k, v in layout_agg.items()
     }
     te["total_recorded"] = len(records)
 
     if te["font_stats"]:
-        best_f = max(te["font_stats"].items(), key=lambda x: x[1]["avg_ctr_proxy"])[0]
-        te["winning_font"] = best_f
+        te["winning_font"] = max(te["font_stats"].items(), key=lambda x: x[1]["avg_ctr_proxy"])[0]
     if te["layout_stats"]:
-        best_l = max(te["layout_stats"].items(), key=lambda x: x[1]["avg_ctr_proxy"])[0]
-        te["winning_layout"] = best_l
+        te["winning_layout"] = max(te["layout_stats"].items(), key=lambda x: x[1]["avg_ctr_proxy"])[0]
 
     mem["thumbnail_experiments"] = te
 
 
 def pick_thumbnail_experiment_config(topic_text="", category="tech"):
-    """
-    50-Video Thumbnail Experiment & Self-Learning Picker:
-    - Videos 1-50: Systematically rotates all 6 fonts & 4 layouts so every option gets fair samples,
-      while blending in early CTR-proxy winners once all options have >= 2 tests.
-    - After 50 Videos: Automatically locks onto the #1 winning font & layout 80% of the time,
-      with 20% smart exploration to stay ahead of evolving trends.
-    """
     mem = load_strategy_memory()
     te = mem.get("thumbnail_experiments") or {}
     records = te.get("records") or {}
     total_done = len(records)
     target = int(te.get("target_videos", THUMB_EXPERIMENT_TARGET))
 
-    # Count how many times each font & layout has been used in the 50-video ledger
     font_counts = {f: 0 for f in THUMBNAIL_FONTS}
     layout_counts = {l: 0 for l in THUMBNAIL_LAYOUTS}
     for rec in records.values():
-        fn = rec.get("font")
-        ly = rec.get("layout")
+        fn, ly = rec.get("font"), rec.get("layout")
         if fn in font_counts:
             font_counts[fn] += 1
         if ly in layout_counts:
@@ -325,30 +302,28 @@ def pick_thumbnail_experiment_config(topic_text="", category="tech"):
 
     if total_done < target:
         phase = f"50-Video Experiment ({total_done + 1}/{target})"
-        min_f = min(font_counts.values())
-        min_l = min(layout_counts.values())
-        # Ensure balanced testing first; once each has >= 3 tests, lean 40% toward current leader
+        min_f, min_l = min(font_counts.values()), min(layout_counts.values())
         if min_f >= 3 and font_stats and random.random() < 0.40:
             chosen_font = te.get("winning_font", "Anton")
         else:
-            least_fonts = [f for f, c in font_counts.items() if c == min_f]
-            chosen_font = random.choice(least_fonts)
+            chosen_font = random.choice([f for f, c in font_counts.items() if c == min_f])
 
         if min_l >= 4 and layout_stats and random.random() < 0.40:
-            chosen_layout = te.get("winning_layout", "mrbeast_bottom_slam")
+            chosen_layout = te.get("winning_layout", "mrbeast_top_boom")
         else:
-            least_layouts = [l for l, c in layout_counts.items() if c == min_l]
-            chosen_layout = random.choice(least_layouts)
+            chosen_layout = random.choice([l for l, c in layout_counts.items() if c == min_l])
     else:
         phase = f"Mastery Auto-Winner ({total_done} tested)"
         if random.random() < 0.80:
             chosen_font = te.get("winning_font", "Anton")
-            chosen_layout = te.get("winning_layout", "mrbeast_bottom_slam")
+            chosen_layout = te.get("winning_layout", "mrbeast_top_boom")
         else:
             chosen_font = random.choice(THUMBNAIL_FONTS)
             chosen_layout = random.choice(THUMBNAIL_LAYOUTS)
 
-    # Topic-matched accent color psychology (zero clickbait — matches story emotion)
+    if chosen_layout not in THUMBNAIL_LAYOUTS:
+        chosen_layout = "mrbeast_top_boom"
+
     low = f"{topic_text} {category}".lower()
     if any(w in low for w in ("crash", "scandal", "drop", "warning", "ban", "hack", "loss", "crisis", "risk", "exposed")):
         accent = "red"
@@ -359,18 +334,12 @@ def pick_thumbnail_experiment_config(topic_text="", category="tech"):
     else:
         accent = "gold"
 
-    cfg = {
-        "font": chosen_font,
-        "layout": chosen_layout,
-        "accent": accent,
-        "phase": phase,
-    }
+    cfg = {"font": chosen_font, "layout": chosen_layout, "accent": accent, "phase": phase}
     print(f"[ThumbAI] {phase} -> Font: {chosen_font} | Layout: {chosen_layout} | Accent: {accent}")
     return cfg
 
 
 def record_thumbnail_experiment(video_id, thumb_cfg, topic="", is_shorts=False):
-    """Logs the uploaded video's thumbnail font, layout & accent in the 50-video learning ledger."""
     if not video_id or not thumb_cfg:
         return
     mem = load_strategy_memory()
@@ -379,7 +348,7 @@ def record_thumbnail_experiment(video_id, thumb_cfg, topic="", is_shorts=False):
 
     records[video_id] = {
         "font": thumb_cfg.get("font", "Anton"),
-        "layout": thumb_cfg.get("layout", "mrbeast_bottom_slam"),
+        "layout": thumb_cfg.get("layout", "mrbeast_top_boom"),
         "accent": thumb_cfg.get("accent", "gold"),
         "topic": str(topic or "")[:70],
         "is_shorts": bool(is_shorts),
@@ -388,7 +357,6 @@ def record_thumbnail_experiment(video_id, thumb_cfg, topic="", is_shorts=False):
         "ctr_proxy": None,
     }
 
-    # Keep the latest 100 experiment records to keep JSON compact
     if len(records) > 100:
         sorted_keys = sorted(records.keys(), key=lambda k: records[k].get("uploaded_utc", ""))
         for old_k in sorted_keys[:-100]:
@@ -399,6 +367,24 @@ def record_thumbnail_experiment(video_id, thumb_cfg, topic="", is_shorts=False):
     mem["thumbnail_experiments"] = te
     save_strategy_memory(mem)
     print(f"[ThumbAI] Recorded experiment #{te['total_recorded']} for video {video_id}")
+
+
+def should_sync_channel_branding():
+    """Returns True if channel SEO description/keywords haven't been synced in the past 7 days."""
+    mem = load_strategy_memory()
+    last_s = mem.get("last_branding_sync_utc", "")
+    if not last_s:
+        return True
+    dt = _parse_utc_dt(last_s)
+    if not dt:
+        return True
+    return (datetime.now(timezone.utc) - dt) >= timedelta(days=7)
+
+
+def mark_channel_branding_synced():
+    mem = load_strategy_memory()
+    mem["last_branding_sync_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    save_strategy_memory(mem)
 
 
 def update_strategy_from_youtube(youtube_service=None):
@@ -421,26 +407,20 @@ def update_strategy_from_youtube(youtube_service=None):
             return mem
 
         v_resp = youtube_service.videos().list(
-            part="snippet,statistics,contentDetails,status",
-            id=",".join(vid_ids[:50]),
+            part="snippet,statistics,contentDetails,status", id=",".join(vid_ids[:50])
         ).execute()
 
         now_utc = datetime.now(timezone.utc)
         shorts_views, long_views = [], []
         hourly_raw = {"shorts": {}, "long": {}}
-        pattern_scores = {}
-        keyword_scores = {}
-        top_performing = []
-        live_scheduled_slots = {}
-        public_vid_ids = []
-        live_video_metrics = {}
+        pattern_scores, keyword_scores = {}, {}
+        top_performing, live_scheduled_slots, public_vid_ids, live_video_metrics = [], {}, [], {}
+        best_long = (0, "")
 
         for v in v_resp.get("items", []):
             vid_id = v.get("id", "")
-            snip = v.get("snippet", {})
-            stats = v.get("statistics", {})
-            cdet = v.get("contentDetails", {})
-            status = v.get("status", {})
+            snip, stats = v.get("snippet", {}), v.get("statistics", {})
+            cdet, status = v.get("contentDetails", {}), v.get("status", {})
 
             dur_s = _parse_iso_duration_seconds(cdet.get("duration", ""))
             v_fmt = "shorts" if dur_s <= 120 else "long"
@@ -452,9 +432,7 @@ def update_strategy_from_youtube(youtube_service=None):
                     sched_et = sched_dt.astimezone(US_EASTERN)
                     d_key = sched_et.strftime("%Y-%m-%d")
                     live_scheduled_slots.setdefault(d_key, []).append({
-                        "hour_et": sched_et.hour,
-                        "format": v_fmt,
-                        "publish_at_utc": pub_at_str,
+                        "hour_et": sched_et.hour, "format": v_fmt, "publish_at_utc": pub_at_str,
                     })
                 continue
 
@@ -474,16 +452,14 @@ def update_strategy_from_youtube(youtube_service=None):
             velocity = (views / (age_hours ** 0.65)) * eng_boost
             reach_score = (views * 0.55 + velocity * 12.0) * eng_boost
 
-            live_video_metrics[vid_id] = {
-                "views": views,
-                "velocity": velocity,
-                "reach_score": reach_score,
-            }
+            live_video_metrics[vid_id] = {"views": views, "velocity": velocity, "reach_score": reach_score}
 
             if v_fmt == "shorts":
                 shorts_views.append(views)
             else:
                 long_views.append(views)
+                if views >= best_long[0]:
+                    best_long = (views, vid_id)
 
             pub_et = pub_dt.astimezone(US_EASTERN)
             hr_key = str(pub_et.hour)
@@ -511,8 +487,9 @@ def update_strategy_from_youtube(youtube_service=None):
             mem["shorts_score"] = round(sum(shorts_views) / len(shorts_views), 2)
         if long_views:
             mem["long_score"] = round(sum(long_views) / len(long_views), 2)
+        if best_long[1]:
+            mem["best_long_video_id"] = best_long[1]
 
-        # Score all 50-video thumbnail font & layout experiments against live YouTube performance
         _update_thumbnail_experiment_scores(mem, live_video_metrics)
 
         hourly_summary = {"shorts": {}, "long": {}}
@@ -539,15 +516,12 @@ def update_strategy_from_youtube(youtube_service=None):
         if top_performing:
             top_performing.sort(key=lambda x: x[0], reverse=True)
             mem["winning_topics"] = [t[:65] for _, t in top_performing[:5]]
-
         if pattern_scores:
             ranked_pats = sorted(pattern_scores.items(), key=lambda x: x[1]["sum"] / max(1, x[1]["cnt"]), reverse=True)
             mem["winning_title_patterns"] = [p for p, _ in ranked_pats[:3]]
-
         if keyword_scores:
             ranked_kws = sorted(keyword_scores.items(), key=lambda x: x[1]["sum"] / max(1, x[1]["cnt"]), reverse=True)
             mem["winning_keywords"] = [k for k, _ in ranked_kws[:10]]
-
         if public_vid_ids:
             fresh_comments = _fetch_recent_viewer_comments(youtube_service, public_vid_ids)
             if fresh_comments:
@@ -580,7 +554,6 @@ def update_strategy_from_youtube(youtube_service=None):
 def _gemini_seo_rewrite(gemini_api_key, old_title, old_desc, seo_keywords, is_shorts, winning_patterns):
     if not gemini_api_key:
         return None
-
     kw_str = ", ".join(seo_keywords[:12]) if seo_keywords else "tech news, ai news, gaming, stock market"
     prompt = f"""You are a YouTube US SEO & CTR Optimization Specialist.
 An uploaded {'YouTube Short' if is_shorts else 'Long-Form YouTube Video'} is underperforming in its first 48 hours.
@@ -591,30 +564,17 @@ Current Description: {old_desc[:1200]}
 Live US YouTube Autocomplete Keywords: {kw_str}
 Channel's Best-Performing Title Hook Styles: {', '.join(winning_patterns or ['curiosity_contrast'])}
 
-Rules:
-- Title: Punchy, high curiosity, under 88 chars, naturally include the strongest search keyword. {'End with #Shorts.' if is_shorts else 'No #Shorts tag.'}
-- Description: First 2 lines must be ultra-SEO friendly with natural keywords + call to action, preserve any 00:00 chapter lines if present, end with 4-6 relevant hashtags.
-- Tags: 15-20 high-relevance US search keywords (no # symbols).
-
 Return ONLY valid JSON:
-{{
-  "title": "string",
-  "description": "string",
-  "tags": ["kw1", "kw2"]
-}}
+{{"title": "string", "description": "string", "tags": ["kw1", "kw2"]}}
 """
-    models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemma-3-27b-it"]
+    models = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemma-3-27b-it"]
     for model in models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
             cfg = {"temperature": 0.7, "maxOutputTokens": 1200}
             if "gemma" not in model:
                 cfg["responseMimeType"] = "application/json"
-            resp = requests.post(
-                url,
-                json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg},
-                timeout=45,
-            )
+            resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": cfg}, timeout=45)
             if resp.status_code != 200:
                 continue
             raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -634,7 +594,6 @@ Return ONLY valid JSON:
 def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_run=2):
     if not youtube_service or not gemini_api_key:
         return
-
     mem = load_strategy_memory()
     healed_ids = set(mem.get("healed_video_ids") or [])
 
@@ -644,18 +603,12 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
         if not items:
             return
         uploads_pl = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
-        pl_resp = youtube_service.playlistItems().list(
-            part="contentDetails", playlistId=uploads_pl, maxResults=20
-        ).execute()
+        pl_resp = youtube_service.playlistItems().list(part="contentDetails", playlistId=uploads_pl, maxResults=20).execute()
         vid_ids = [it["contentDetails"]["videoId"] for it in pl_resp.get("items", []) if it.get("contentDetails")]
         if not vid_ids:
             return
 
-        v_resp = youtube_service.videos().list(
-            part="snippet,statistics,contentDetails,status",
-            id=",".join(vid_ids[:20]),
-        ).execute()
-
+        v_resp = youtube_service.videos().list(part="snippet,statistics,contentDetails,status", id=",".join(vid_ids[:20])).execute()
         now_utc = datetime.now(timezone.utc)
         repaired = 0
         shorts_thresh = max(80.0, float(mem.get("shorts_score", 100.0)) * 0.60)
@@ -665,17 +618,10 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
             if repaired >= max_repairs_per_run:
                 break
             vid_id = v.get("id", "")
-            if not vid_id or vid_id in healed_ids:
+            if not vid_id or vid_id in healed_ids or v.get("status", {}).get("privacyStatus") != "public":
                 continue
 
-            status = v.get("status", {})
-            if status.get("privacyStatus") != "public":
-                continue
-
-            snip = v.get("snippet", {})
-            stats = v.get("statistics", {})
-            cdet = v.get("contentDetails", {})
-
+            snip, stats, cdet = v.get("snippet", {}), v.get("statistics", {}), v.get("contentDetails", {})
             pub_dt = _parse_utc_dt(snip.get("publishedAt", ""))
             if not pub_dt:
                 continue
@@ -683,27 +629,14 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
             if not (6.0 <= age_h <= 48.0):
                 continue
 
-            dur_s = _parse_iso_duration_seconds(cdet.get("duration", ""))
-            is_shorts = dur_s <= 120
+            is_shorts = _parse_iso_duration_seconds(cdet.get("duration", "")) <= 120
             views = int(stats.get("viewCount", 0))
-            thresh = shorts_thresh if is_shorts else long_thresh
-
-            if views >= thresh:
+            if views >= (shorts_thresh if is_shorts else long_thresh):
                 continue
 
-            old_title = snip.get("title", "")
-            old_desc = snip.get("description", "")
-            cat_id = snip.get("categoryId", "28")
-
+            old_title, old_desc = snip.get("title", ""), snip.get("description", "")
             live_kws = fetch_youtube_autocomplete_keywords(old_title, max_results=14)
-            rewritten = _gemini_seo_rewrite(
-                gemini_api_key,
-                old_title,
-                old_desc,
-                live_kws,
-                is_shorts,
-                mem.get("winning_title_patterns", []),
-            )
+            rewritten = _gemini_seo_rewrite(gemini_api_key, old_title, old_desc, live_kws, is_shorts, mem.get("winning_title_patterns", []))
             if not rewritten:
                 continue
 
@@ -711,7 +644,7 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
             if is_shorts and "#shorts" not in new_title.lower() and len(new_title) <= 90:
                 new_title += " #Shorts"
             new_desc = str(rewritten["description"]).strip()[:4900]
-            new_tags = [str(t).strip() for t in (rewritten.get("tags") or live_kws) if str(t).strip()][:25]
+            new_tags = [re.sub(r"[<>#\"']+", "", str(t)).strip() for t in (rewritten.get("tags") or live_kws) if str(t).strip()][:16]
 
             try:
                 youtube_service.videos().update(
@@ -722,17 +655,14 @@ def run_48h_seo_self_healing(youtube_service, gemini_api_key, max_repairs_per_ru
                             "title": new_title,
                             "description": new_desc,
                             "tags": new_tags,
-                            "categoryId": cat_id,
+                            "categoryId": snip.get("categoryId", "28"),
                             "defaultLanguage": "en",
                         },
                     },
                 ).execute()
                 healed_ids.add(vid_id)
                 repaired += 1
-                print(
-                    f"[SEO-SelfHeal 48h] Refreshed ({age_h:.1f}h old, {views} views) -> "
-                    f"'{old_title[:45]}' => '{new_title[:55]}'"
-                )
+                print(f"[SEO-SelfHeal 48h] Refreshed ({age_h:.1f}h old, {views} views) -> '{new_title[:55]}'")
             except Exception as upd_e:
                 print(f"[SEO-SelfHeal 48h] Update skipped for {vid_id}: {upd_e}")
                 break
@@ -769,8 +699,7 @@ def pick_smart_publish_time(video_format="shorts", min_lead_minutes=30):
             cand = earliest_et.replace(hour=hr, minute=45, second=0, microsecond=0)
         return cand
 
-    chosen_dt = None
-    reason = ""
+    chosen_dt, reason = None, ""
 
     if golden_hr not in claimed_hours_same_fmt:
         g_dt = _candidate_dt_for_hour(golden_hr)
@@ -821,10 +750,6 @@ def record_scheduled_slot(video_format, hour_et, date_et_key, publish_iso):
     day_list = sched.setdefault(date_et_key, [])
     fmt = "shorts" if str(video_format).strip().lower() == "shorts" else "long"
     if not any(x.get("hour_et") == hour_et and x.get("format") == fmt for x in day_list):
-        day_list.append({
-            "hour_et": int(hour_et),
-            "format": fmt,
-            "publish_at_utc": publish_iso,
-        })
+        day_list.append({"hour_et": int(hour_et), "format": fmt, "publish_at_utc": publish_iso})
     mem["scheduled_slots"] = sched
     save_strategy_memory(mem)
