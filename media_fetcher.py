@@ -14,8 +14,28 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+STOP_VISUAL_WORDS = {
+    "a", "an", "the", "with", "over", "in", "on", "of", "and", "or", "for", "to", "at", "by",
+    "from", "into", "about", "appearing", "centered", "screen", "text", "bold", "snippet",
+    "capture", "message", "icon", "photo", "photos", "side", "wearing", "holding", "during",
+    "background", "showing", "made", "single", "headline", "logos", "logo", "error", "warning",
+    "modern", "smiling", "jacket", "lines", "glowing", "high", "low", "red", "gold", "green",
+}
 
-def _download_file(url, dest_path, timeout=25, min_bytes=1024):
+
+def _simplify_stock_query(query, max_words=3):
+    """Condenses verbose AI visual prompts into 2-3 crisp stock-API keywords so searches never stall."""
+    clean = re.sub(r"['\"].*?['\"]", " ", str(query or ""))
+    clean = re.sub(r"[^a-zA-Z0-9\s]", " ", clean)
+    words = [w for w in clean.split() if len(w) > 2 and w.lower() not in STOP_VISUAL_WORDS]
+    if not words:
+        words = [w for w in clean.split() if len(w) > 2]
+    if not words:
+        return "technology"
+    return " ".join(words[:max_words])
+
+
+def _download_file(url, dest_path, timeout=22, min_bytes=1024):
     resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout, stream=True)
     resp.raise_for_status()
     with open(dest_path, "wb") as f:
@@ -42,7 +62,7 @@ def fetch_freesound_sfx(query, out_mp3):
                 "token": FREESOUND_API_KEY,
             },
             headers={"User-Agent": USER_AGENT},
-            timeout=15,
+            timeout=12,
         )
         if r.status_code != 200:
             return None
@@ -53,7 +73,7 @@ def fetch_freesound_sfx(query, out_mp3):
         for item in results[:4]:
             previews = item.get("previews", {})
             mp3_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
-            if mp3_url and _download_file(mp3_url, out_mp3, timeout=20, min_bytes=1024):
+            if mp3_url and _download_file(mp3_url, out_mp3, timeout=18, min_bytes=1024):
                 print(f"[Freesound] CC0 SFX: {item.get('name', query)}")
                 return out_mp3
     except Exception as e:
@@ -83,7 +103,7 @@ def fetch_freesound_music(query, out_mp3):
                     "token": FREESOUND_API_KEY,
                 },
                 headers={"User-Agent": USER_AGENT},
-                timeout=18,
+                timeout=15,
             )
             if r.status_code != 200:
                 continue
@@ -94,7 +114,7 @@ def fetch_freesound_music(query, out_mp3):
             for item in results[:5]:
                 previews = item.get("previews", {})
                 mp3_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
-                if mp3_url and _download_file(mp3_url, out_mp3, timeout=35, min_bytes=40960):
+                if mp3_url and _download_file(mp3_url, out_mp3, timeout=30, min_bytes=40960):
                     dur_val = float(item.get("duration", 0))
                     print(f"[FreesoundMusic] Downloaded CC0 BGM: {item.get('name', q)} ({dur_val:.0f}s)")
                     return out_mp3
@@ -108,7 +128,7 @@ def fetch_giphy_sticker(query, out_gif):
     if not GIPHY_API_KEY:
         return None
     os.makedirs(os.path.dirname(out_gif), exist_ok=True)
-    q = (query or "trending").strip()
+    q = _simplify_stock_query(query or "trending", max_words=3)
 
     for endpoint in ("https://api.giphy.com/v1/stickers/search", "https://api.giphy.com/v1/gifs/search"):
         try:
@@ -122,7 +142,7 @@ def fetch_giphy_sticker(query, out_gif):
                     "lang": "en",
                 },
                 headers={"User-Agent": USER_AGENT},
-                timeout=15,
+                timeout=12,
             )
             if r.status_code != 200:
                 continue
@@ -137,7 +157,7 @@ def fetch_giphy_sticker(query, out_gif):
                     or imgs.get("downsized", {}).get("url")
                     or imgs.get("original", {}).get("url")
                 )
-                if gif_url and _download_file(gif_url, out_gif, timeout=20):
+                if gif_url and _download_file(gif_url, out_gif, timeout=18):
                     try:
                         with Image.open(out_gif) as im:
                             if im.size[0] >= 80 and im.size[1] >= 80:
@@ -161,7 +181,7 @@ def fetch_unsplash_photo(query, out_path, orientation="landscape", used_urls=Non
     if used_urls is None:
         used_urls = set()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    q = (query or "technology").strip()
+    q = _simplify_stock_query(query, max_words=3)
     try:
         r = requests.get(
             "https://api.unsplash.com/search/photos",
@@ -176,14 +196,14 @@ def fetch_unsplash_photo(query, out_path, orientation="landscape", used_urls=Non
                 "orientation": orientation,
                 "content_filter": "high",
             },
-            timeout=15,
+            timeout=12,
         )
         if r.status_code == 200:
             for item in r.json().get("results", []):
                 urls = item.get("urls", {})
                 u = urls.get("regular") or urls.get("full")
                 if u and u not in used_urls:
-                    if _download_file(u, out_path, timeout=20):
+                    if _download_file(u, out_path, timeout=18):
                         used_urls.add(u)
                         return out_path
     except Exception as e:
@@ -193,7 +213,7 @@ def fetch_unsplash_photo(query, out_path, orientation="landscape", used_urls=Non
 
 def fetch_stock_image(query, out_path, orientation="landscape", used_urls=None):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    q = (query or "technology").strip()
+    q = _simplify_stock_query(query, max_words=3)
 
     u_hit = fetch_unsplash_photo(q, out_path, orientation=orientation, used_urls=used_urls)
     if u_hit:
@@ -205,13 +225,13 @@ def fetch_stock_image(query, out_path, orientation="landscape", used_urls=None):
                 "https://api.pexels.com/v1/search",
                 headers={"Authorization": PEXELS_API_KEY, "User-Agent": USER_AGENT},
                 params={"query": q, "per_page": 6, "orientation": orientation},
-                timeout=15,
+                timeout=10,
             )
             if r.status_code == 200:
                 for p in r.json().get("photos", []):
                     src_url = p.get("src", {}).get("large2x") or p.get("src", {}).get("large")
                     if src_url and (used_urls is None or src_url not in used_urls):
-                        if _download_file(src_url, out_path):
+                        if _download_file(src_url, out_path, timeout=18):
                             if used_urls is not None:
                                 used_urls.add(src_url)
                             return out_path
@@ -229,18 +249,18 @@ def fetch_stock_image(query, out_path, orientation="landscape", used_urls=None):
                     "per_page": 8,
                     "safesearch": "true",
                 },
-                timeout=15,
+                timeout=10,
             )
             if r.status_code == 200:
                 for h in r.json().get("hits", []):
                     u = h.get("largeImageURL") or h.get("webformatURL")
                     if u and (used_urls is None or u not in used_urls):
-                        if _download_file(u, out_path):
+                        if _download_file(u, out_path, timeout=18):
                             if used_urls is not None:
                                 used_urls.add(u)
                             return out_path
         except Exception as e:
-            print(f"[Media] Pixabay image fallback: {e}")
+            print(f"[Media] Pixabay image fallback ({q}): {e}")
 
     img = Image.new("RGB", (1920, 1080), (12, 15, 22))
     img.save(out_path, "JPEG", quality=90)
@@ -252,7 +272,7 @@ def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
     if used_urls is None:
         used_urls = set()
 
-    q = (query or "futuristic technology").strip()
+    q = _simplify_stock_query(query, max_words=3)
     orientation = "portrait" if is_shorts else "landscape"
 
     if PEXELS_API_KEY:
@@ -261,7 +281,7 @@ def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
                 "https://api.pexels.com/videos/search",
                 headers={"Authorization": PEXELS_API_KEY, "User-Agent": USER_AGENT},
                 params={"query": q, "per_page": 10, "orientation": orientation},
-                timeout=18,
+                timeout=10,
             )
             if r.status_code == 200:
                 for v in r.json().get("videos", []):
@@ -272,7 +292,7 @@ def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
                         link = vf["link"]
                         if link in used_urls:
                             continue
-                        if _download_file(link, out_mp4, timeout=30):
+                        if _download_file(link, out_mp4, timeout=22):
                             used_urls.add(link)
                             return out_mp4
         except Exception as e:
@@ -283,7 +303,7 @@ def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
             r = requests.get(
                 "https://pixabay.com/api/videos/",
                 params={"key": PIXABAY_API_KEY, "q": q, "per_page": 10, "safesearch": "true"},
-                timeout=18,
+                timeout=10,
             )
             if r.status_code == 200:
                 for h in r.json().get("hits", []):
@@ -292,7 +312,7 @@ def fetch_broll_clip(query, out_mp4, used_urls=None, is_shorts=False):
                         vinfo = vdict.get(quality, {})
                         link = vinfo.get("url")
                         if link and link not in used_urls:
-                            if _download_file(link, out_mp4, timeout=30):
+                            if _download_file(link, out_mp4, timeout=22):
                                 used_urls.add(link)
                                 return out_mp4
         except Exception as e:
