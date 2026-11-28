@@ -1,6 +1,6 @@
 {
-  "shorts_score": 207.45,
-  "long_score": 6.55,
+  "shorts_score": 211.75,
+  "long_score": 6.0,
   "winning_topics": [
     "California Sues OpenAI Over Safety",
     "Nvidia's AI Ban & Trump News Today: Market Bubble Alert?",
@@ -21,13 +21,13 @@
     "tech stocks",
     "tech trends",
     "gta 6 jason",
-    "gta 6 protagonist",
     "grand theft auto 6",
     "california lawsuit",
-    "gaming trends",
     "china trade",
     "gpu prices",
-    "market news"
+    "market news",
+    "nasdaq",
+    "gaming trends"
   ],
   "recent_viewer_comments": [],
   "healed_video_ids": [
@@ -44,13 +44,13 @@
   "endscreen_picks": {
     "top": {
       "id": "dYRXflwqBKs",
-      "title": "How GTA 6 Just Reset the Global Entertainment Economy",
+      "title": "Why GTA 6 Just Broke the Entire Global Economy",
       "views": 34
     },
     "boost": {
-      "id": "eV59AHFY5n8",
-      "title": "Nvidia\u2019s High-Stakes Comeback: The Jensen Huang Scandal and Your Portfolio",
-      "views": 1
+      "id": "bJp6KeMsY4A",
+      "title": "Stock Market Today Live: Nvidia Shock, GTA 6 Chaos & Tech Bubble Alert",
+      "views": 0
     }
   },
   "last_branding_sync_utc": "2026-11-27T13:40:56Z",
@@ -74,90 +74,90 @@
     "shorts": {
       "19": {
         "count": 5,
-        "avg_views": 578.4,
-        "avg_reach": 1011.72
+        "avg_views": 594.6,
+        "avg_reach": 1027.13
       },
       "10": {
         "count": 2,
         "avg_views": 28.5,
-        "avg_reach": 73.77
+        "avg_reach": 69.51
       },
       "23": {
         "count": 2,
-        "avg_views": 271.0,
-        "avg_reach": 668.02
+        "avg_views": 273.5,
+        "avg_reach": 651.71
       },
       "20": {
         "count": 1,
         "avg_views": 43.0,
-        "avg_reach": 106.94
+        "avg_reach": 103.23
       },
       "12": {
         "count": 2,
         "avg_views": 9.0,
-        "avg_reach": 23.21
+        "avg_reach": 22.8
       },
       "8": {
         "count": 2,
         "avg_views": 66.0,
-        "avg_reach": 102.95
+        "avg_reach": 101.53
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 5.84
+        "avg_reach": 5.74
       },
       "9": {
         "count": 2,
         "avg_views": 59.0,
-        "avg_reach": 88.47
+        "avg_reach": 87.53
       },
       "0": {
         "count": 1,
         "avg_views": 336.0,
-        "avg_reach": 486.05
+        "avg_reach": 481.09
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 11.96
+        "avg_reach": 11.9
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 5.97
+        "avg_reach": 5.93
       }
     },
     "long": {
+      "21": {
+        "count": 4,
+        "avg_views": 2.8,
+        "avg_reach": 9.52
+      },
       "10": {
         "count": 1,
         "avg_views": 11.0,
-        "avg_reach": 70.63
-      },
-      "21": {
-        "count": 3,
-        "avg_views": 3.7,
-        "avg_reach": 13.1
+        "avg_reach": 64.31
       },
       "4": {
         "count": 3,
         "avg_views": 14.0,
-        "avg_reach": 35.26
+        "avg_reach": 34.6
       },
       "22": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 7.59
+        "avg_reach": 7.51
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.21
+        "avg_reach": 1.2
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.01
+        "avg_reach": 3.98
       }
     }
   },
@@ -187,46 +187,51 @@
   },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 8,
+    "total_recorded": 9,
     "winning_font": "Bangers",
     "winning_layout": "upper_left_hero",
     "font_stats": {
       "Bangers": {
         "count": 1,
-        "avg_ctr_proxy": 3.124,
-        "avg_views": 600.0
+        "avg_ctr_proxy": 3.373,
+        "avg_views": 679.0
       },
       "Poppins Black": {
-        "count": 1,
-        "avg_ctr_proxy": 0.223,
-        "avg_views": 43.0
+        "count": 2,
+        "avg_ctr_proxy": 0.106,
+        "avg_views": 21.5
       },
       "Oswald": {
         "count": 1,
-        "avg_ctr_proxy": 1.033,
+        "avg_ctr_proxy": 1.053,
         "avg_views": 6.0
       },
       "Bebas Neue": {
         "count": 1,
-        "avg_ctr_proxy": 1.488,
+        "avg_ctr_proxy": 1.419,
         "avg_views": 279.0
       },
       "Anton": {
         "count": 1,
-        "avg_ctr_proxy": 0.129,
+        "avg_ctr_proxy": 0.117,
         "avg_views": 16.0
       },
       "Lilita One": {
         "count": 1,
-        "avg_ctr_proxy": 0.028,
+        "avg_ctr_proxy": 0.022,
         "avg_views": 2.0
       }
     },
     "layout_stats": {
       "upper_left_hero": {
         "count": 1,
-        "avg_ctr_proxy": 0.028,
+        "avg_ctr_proxy": 0.022,
         "avg_views": 2.0
+      },
+      "split_vs_drama": {
+        "count": 1,
+        "avg_ctr_proxy": 0.0,
+        "avg_views": 0.0
       }
     },
     "records": {
@@ -237,8 +242,8 @@
         "topic": "Nvidia AI Chip Restrictions and AI Bubble Risks",
         "is_shorts": true,
         "uploaded_utc": "2026-11-26T22:04:23Z",
-        "views": 600,
-        "ctr_proxy": 3.124
+        "views": 679,
+        "ctr_proxy": 3.373
       },
       "rb0izYGOOko": {
         "font": "Poppins Black",
@@ -248,7 +253,7 @@
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T00:06:07Z",
         "views": 43,
-        "ctr_proxy": 0.223
+        "ctr_proxy": 0.213
       },
       "4iMi3mW0qy8": {
         "font": "Oswald",
@@ -258,7 +263,7 @@
         "is_shorts": false,
         "uploaded_utc": "2026-11-27T02:09:31Z",
         "views": 6,
-        "ctr_proxy": 1.033
+        "ctr_proxy": 1.053
       },
       "vz_JK9KKjfU": {
         "font": "Bebas Neue",
@@ -268,7 +273,7 @@
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T03:51:02Z",
         "views": 279,
-        "ctr_proxy": 1.488
+        "ctr_proxy": 1.419
       },
       "6sg1g72WpBI": {
         "font": "Anton",
@@ -278,7 +283,7 @@
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T13:14:09Z",
         "views": 16,
-        "ctr_proxy": 0.129
+        "ctr_proxy": 0.117
       },
       "ysi9Vb_ieE8": {
         "font": "Lilita One",
@@ -288,7 +293,7 @@
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T21:39:50Z",
         "views": 2,
-        "ctr_proxy": 0.028
+        "ctr_proxy": 0.022
       },
       "EtZKD_iKxKs": {
         "font": "Oswald",
@@ -308,11 +313,21 @@
         "is_shorts": false,
         "uploaded_utc": "2026-11-28T01:48:35Z",
         "views": 0,
+        "ctr_proxy": 0.0
+      },
+      "5GIkCYSyTP0": {
+        "font": "Bangers",
+        "layout": "mrbeast_top_boom",
+        "accent": "cyan",
+        "topic": "Nvidia Chip Shipments Paused & GTA 6 Industry Impact",
+        "is_shorts": true,
+        "uploaded_utc": "2026-11-28T03:33:27Z",
+        "views": 0,
         "ctr_proxy": null
       }
     }
   },
-  "last_updated_utc": "2026-11-28T01:40:58Z",
+  "last_updated_utc": "2026-11-28T03:31:08Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
