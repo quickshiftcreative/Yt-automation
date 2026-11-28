@@ -1,12 +1,12 @@
 {
-  "shorts_score": 217.21,
-  "long_score": 6.45,
+  "shorts_score": 207.45,
+  "long_score": 6.55,
   "winning_topics": [
     "California Sues OpenAI Over Safety",
     "Nvidia's AI Ban & Trump News Today: Market Bubble Alert?",
     "GTA 6 Jason Inspiration Revealed: Steve McQueen & Real Veterans",
-    "Boston GTA Just Dropped and It's Wild \ud83c\udfae",
-    "How GTA 6 Uses Real Drivers for Perfect Handling"
+    "How GTA 6 Uses Real Drivers for Perfect Handling",
+    "Boston GTA Just Dropped and It's Wild \ud83c\udfae"
   ],
   "avoid_patterns": [
     "generic filler intros",
@@ -18,25 +18,27 @@
     "direct_statement"
   ],
   "winning_keywords": [
-    "california lawsuit",
-    "china trade",
-    "gpu prices",
+    "tech stocks",
     "tech trends",
     "gta 6 jason",
     "gta 6 protagonist",
-    "gta vi",
-    "tech stocks",
+    "grand theft auto 6",
+    "california lawsuit",
     "gaming trends",
-    "ai bubble"
+    "china trade",
+    "gpu prices",
+    "market news"
   ],
   "recent_viewer_comments": [],
   "healed_video_ids": [
-    "4iMi3mW0qy8",
-    "cGp92koOp_A",
-    "rb0izYGOOko",
+    "dYRXflwqBKs",
+    "6sg1g72WpBI",
     "vrOdU9BBemg",
     "vz_JK9KKjfU",
-    "6sg1g72WpBI"
+    "rb0izYGOOko",
+    "uQ4coYqSoLs",
+    "4iMi3mW0qy8",
+    "cGp92koOp_A"
   ],
   "best_long_video_id": "dYRXflwqBKs",
   "endscreen_picks": {
@@ -53,7 +55,7 @@
   },
   "last_branding_sync_utc": "2026-11-27T13:40:56Z",
   "golden_hour_shorts_et": 19,
-  "golden_hour_long_et": 10,
+  "golden_hour_long_et": 20,
   "top_hours_shorts_et": [
     19,
     23,
@@ -63,99 +65,99 @@
     22
   ],
   "top_hours_long_et": [
-    10,
     20,
+    10,
     19,
     14
   ],
   "hourly_stats": {
     "shorts": {
+      "19": {
+        "count": 5,
+        "avg_views": 578.4,
+        "avg_reach": 1011.72
+      },
       "10": {
         "count": 2,
-        "avg_views": 27.5,
-        "avg_reach": 76.64
+        "avg_views": 28.5,
+        "avg_reach": 73.77
       },
       "23": {
         "count": 2,
-        "avg_views": 265.0,
-        "avg_reach": 690.12
+        "avg_views": 271.0,
+        "avg_reach": 668.02
       },
       "20": {
         "count": 1,
-        "avg_views": 41.0,
-        "avg_reach": 107.21
-      },
-      "19": {
-        "count": 4,
-        "avg_views": 722.5,
-        "avg_reach": 1287.59
+        "avg_views": 43.0,
+        "avg_reach": 106.94
       },
       "12": {
         "count": 2,
         "avg_views": 9.0,
-        "avg_reach": 23.69
+        "avg_reach": 23.21
       },
       "8": {
         "count": 2,
-        "avg_views": 64.0,
-        "avg_reach": 101.09
+        "avg_views": 66.0,
+        "avg_reach": 102.95
       },
       "17": {
         "count": 1,
         "avg_views": 2.0,
-        "avg_reach": 5.95
+        "avg_reach": 5.84
       },
       "9": {
         "count": 2,
         "avg_views": 59.0,
-        "avg_reach": 89.53
+        "avg_reach": 88.47
       },
       "0": {
         "count": 1,
         "avg_views": 336.0,
-        "avg_reach": 491.59
+        "avg_reach": 486.05
       },
       "15": {
         "count": 1,
         "avg_views": 6.0,
-        "avg_reach": 12.03
+        "avg_reach": 11.96
       },
       "14": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 6.0
+        "avg_reach": 5.97
       }
     },
     "long": {
       "10": {
         "count": 1,
-        "avg_views": 10.0,
-        "avg_reach": 76.96
+        "avg_views": 11.0,
+        "avg_reach": 70.63
       },
       "21": {
         "count": 3,
         "avg_views": 3.7,
-        "avg_reach": 13.59
+        "avg_reach": 13.1
       },
       "4": {
         "count": 3,
         "avg_views": 14.0,
-        "avg_reach": 36.03
+        "avg_reach": 35.26
       },
       "22": {
         "count": 1,
         "avg_views": 3.0,
-        "avg_reach": 7.69
+        "avg_reach": 7.59
       },
       "6": {
         "count": 1,
         "avg_views": 1.0,
-        "avg_reach": 1.22
+        "avg_reach": 1.21
       },
       "17": {
         "count": 2,
         "avg_views": 2.0,
-        "avg_reach": 4.03
+        "avg_reach": 4.01
       }
     }
   },
@@ -175,42 +177,58 @@
         "hour_et": 23,
         "format": "shorts",
         "publish_at_utc": "2026-11-28T04:15:00Z"
+      },
+      {
+        "hour_et": 21,
+        "format": "long",
+        "publish_at_utc": "2026-11-28T02:45:00Z"
       }
     ]
   },
   "thumbnail_experiments": {
     "target_videos": 50,
-    "total_recorded": 7,
+    "total_recorded": 8,
     "winning_font": "Bangers",
-    "winning_layout": "mrbeast_top_boom",
+    "winning_layout": "upper_left_hero",
     "font_stats": {
       "Bangers": {
         "count": 1,
-        "avg_ctr_proxy": 3.062,
+        "avg_ctr_proxy": 3.124,
         "avg_views": 600.0
       },
       "Poppins Black": {
         "count": 1,
-        "avg_ctr_proxy": 0.209,
-        "avg_views": 41.0
+        "avg_ctr_proxy": 0.223,
+        "avg_views": 43.0
       },
       "Oswald": {
         "count": 1,
-        "avg_ctr_proxy": 1.072,
+        "avg_ctr_proxy": 1.033,
         "avg_views": 6.0
       },
       "Bebas Neue": {
         "count": 1,
-        "avg_ctr_proxy": 1.431,
-        "avg_views": 269.0
+        "avg_ctr_proxy": 1.488,
+        "avg_views": 279.0
       },
       "Anton": {
         "count": 1,
-        "avg_ctr_proxy": 0.122,
-        "avg_views": 14.0
+        "avg_ctr_proxy": 0.129,
+        "avg_views": 16.0
+      },
+      "Lilita One": {
+        "count": 1,
+        "avg_ctr_proxy": 0.028,
+        "avg_views": 2.0
       }
     },
-    "layout_stats": {},
+    "layout_stats": {
+      "upper_left_hero": {
+        "count": 1,
+        "avg_ctr_proxy": 0.028,
+        "avg_views": 2.0
+      }
+    },
     "records": {
       "TDueM8_uOLE": {
         "font": "Bangers",
@@ -220,7 +238,7 @@
         "is_shorts": true,
         "uploaded_utc": "2026-11-26T22:04:23Z",
         "views": 600,
-        "ctr_proxy": 3.062
+        "ctr_proxy": 3.124
       },
       "rb0izYGOOko": {
         "font": "Poppins Black",
@@ -229,8 +247,8 @@
         "topic": "Grand Theft Boston AI Parody",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T00:06:07Z",
-        "views": 41,
-        "ctr_proxy": 0.209
+        "views": 43,
+        "ctr_proxy": 0.223
       },
       "4iMi3mW0qy8": {
         "font": "Oswald",
@@ -240,7 +258,7 @@
         "is_shorts": false,
         "uploaded_utc": "2026-11-27T02:09:31Z",
         "views": 6,
-        "ctr_proxy": 1.072
+        "ctr_proxy": 1.033
       },
       "vz_JK9KKjfU": {
         "font": "Bebas Neue",
@@ -249,8 +267,8 @@
         "topic": "GTA Boston AI Parody & Local News Buzz",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T03:51:02Z",
-        "views": 269,
-        "ctr_proxy": 1.431
+        "views": 279,
+        "ctr_proxy": 1.488
       },
       "6sg1g72WpBI": {
         "font": "Anton",
@@ -259,8 +277,8 @@
         "topic": "The Best AI Stocks to Buy Now vs Global Memory Shortage",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T13:14:09Z",
-        "views": 14,
-        "ctr_proxy": 0.122
+        "views": 16,
+        "ctr_proxy": 0.129
       },
       "ysi9Vb_ieE8": {
         "font": "Lilita One",
@@ -269,8 +287,8 @@
         "topic": "Nvidia Blackwell Chips & Trump AI Task Force",
         "is_shorts": true,
         "uploaded_utc": "2026-11-27T21:39:50Z",
-        "views": 0,
-        "ctr_proxy": null
+        "views": 2,
+        "ctr_proxy": 0.028
       },
       "EtZKD_iKxKs": {
         "font": "Oswald",
@@ -281,10 +299,20 @@
         "uploaded_utc": "2026-11-27T23:46:53Z",
         "views": 0,
         "ctr_proxy": null
+      },
+      "bJp6KeMsY4A": {
+        "font": "Poppins Black",
+        "layout": "split_vs_drama",
+        "accent": "red",
+        "topic": "Nvidia's AI Ban & Market Bubble Alert with GTA 6 Industry Impact",
+        "is_shorts": false,
+        "uploaded_utc": "2026-11-28T01:48:35Z",
+        "views": 0,
+        "ctr_proxy": null
       }
     }
   },
-  "last_updated_utc": "2026-11-27T23:43:14Z",
+  "last_updated_utc": "2026-11-28T01:40:58Z",
   "updated_at": "2026-11-26T13:07:26.249931+00:00",
   "preferred_format": "auto",
   "notes": "Self-learning engine initialized for Quick Shift Creative."
